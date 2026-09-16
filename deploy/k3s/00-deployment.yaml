@@ -1,0 +1,96 @@
+# PinaLove Review — Deployment
+# Persistence: hostPath on a pinned worker. NO PVC, NO PV, NO StorageClass, NO Hetzner volume.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pinalove
+  namespace: tool4trip
+  labels:
+    app: pinalove
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: pinalove
+  template:
+    metadata:
+      labels:
+        app: pinalove
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: productos-workers-43832f42f8e58773
+      imagePullSecrets:
+        - name: ghcr-registry
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+        - name: prepare-data
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - mkdir -p /data && chown 1000:1000 /data && chmod 755 /data
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: pinalove-data
+              mountPath: /data
+      containers:
+        - name: pinalove
+          image: ghcr.io/vantyc/pinalove:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: LISTEN_ADDR
+              value: ":8080"
+            - name: SQLITE_PATH
+              value: /data/pinalove.sqlite
+            - name: STATIC_DIR
+              value: /app/dist/frontend
+            - name: FIXTURES_PATH
+              value: /app/fixtures/sample-profiles.json
+            - name: SEED_ON_EMPTY
+              value: "1"
+            - name: APP_ROOT
+              value: /app
+          volumeMounts:
+            - name: pinalove-data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /pinalove/healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /pinalove/healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+      volumes:
+        - name: pinalove-data
+          hostPath:
+            path: /var/lib/pinalove
+            type: DirectoryOrCreate

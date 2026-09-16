@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pinalove
+  namespace: tool4trip
+  labels:
+    app: pinalove
+spec:
+  type: ClusterIP
+  selector:
+    app: pinalove
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

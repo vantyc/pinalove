@@ -1,0 +1,43 @@
+# New Ingress only. Does not replace tool4trip-web.
+# Priority 70 sits above tool4trip-web (50) so /pinalove is not swallowed by /.
+# Auth: existing Traefik ForwardAuth middleware + cookie tool4trip_session.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pinalove
+  namespace: tool4trip
+  labels:
+    app: pinalove
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: tool4trip-tool4trip-forwardauth@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "70"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: tool4trip.com
+      http:
+        paths:
+          - path: /pinalove
+            pathType: Prefix
+            backend:
+              service:
+                name: pinalove
+                port:
+                  number: 8080
+    - host: www.tool4trip.com
+      http:
+        paths:
+          - path: /pinalove
+            pathType: Prefix
+            backend:
+              service:
+                name: pinalove
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - tool4trip.com
+        - www.tool4trip.com
+      secretName: tool4trip-tls
