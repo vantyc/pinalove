@@ -65,49 +65,10 @@ export function ActionRequiredList({
   return (
     <div>
       <h2>Action required</h2>
-      <p className="muted">What needs attention, in order. Local stale accounts are not discarded.</p>
+      <p className="muted">What needs attention, in order. Review first; contacting is optional and always manual.</p>
       {ready.length === 0 && stale.length === 0 && preselected.length === 0 && needsDetail.length === 0 ? (
         <p className="empty">Nothing in the action queue.</p>
       ) : null}
-      {ready.length > 0 ? (
-        <section className="action-block">
-          <h3>READY TO MESSAGE</h3>
-          <p className="muted">
-            Copy, open the PinaLove profile, send yourself, then Mark as sent. This app never sends.
-          </p>
-          {ready.map((profile) => (
-            <article className="card action-card" key={profile.id}>
-              <div className="photo">
-                {profile.primaryPhotoUrl ? (
-                  <img src={profile.primaryPhotoUrl} alt="" />
-                ) : (
-                  <div className="photo-placeholder">No photo</div>
-                )}
-              </div>
-              <div className="card-body">
-                <div className="row">
-                  <button className="username btn ghost" type="button" onClick={() => navigate(`/profiles/${profile.id}`)}>
-                    {profile.username}
-                  </button>
-                  <StatusPill status={profile.reviewStatus} />
-                  <span className={`pill contact ${profile.contactStatus}`}>READY TO MESSAGE</span>
-                </div>
-                <div className="meta">
-                  <span>{profile.age ?? '?'} yrs</span>
-                  <span>{[profile.location, profile.country].filter(Boolean).join(', ') || 'Unknown location'}</span>
-                  <span>Last active: {formatActivity(profile.lastActivityAt)}</span>
-                </div>
-                <FactLine label="Photo Verified" value={profile.faceVerified} extra={factProvenance(profile, 'faceVerified')} />
-                <FactLine label="Children" value={profile.hasChildren} extra={factProvenance(profile, 'hasChildren')} />
-                <FactLine label="Marital" value={profile.maritalHistory} extra={factProvenance(profile, 'maritalHistory')} />
-                <ProbeDraft profile={profile} onChange={onProfileChange} title="Message draft" />
-              </div>
-            </article>
-          ))}
-        </section>
-      ) : (
-        <p className="muted">READY TO MESSAGE — none.</p>
-      )}
       {stale.length > 0 ? (
         <section className="action-block">
           <h3>LOCAL PROBES</h3>
@@ -168,6 +129,46 @@ export function ActionRequiredList({
         </section>
       ) : (
         <p className="muted">LOCAL PROBES — none.</p>
+      )}
+      {ready.length > 0 ? (
+        <section className="action-block">
+          <h3>READY TO MESSAGE</h3>
+          <p className="muted">
+            These passed enough filters for you to review. Copy / Open / Mark as sent only if you
+            decide to contact them. This app never sends.
+          </p>
+          {ready.map((profile) => (
+            <article className="card action-card" key={profile.id}>
+              <div className="photo">
+                {profile.primaryPhotoUrl ? (
+                  <img src={profile.primaryPhotoUrl} alt="" />
+                ) : (
+                  <div className="photo-placeholder">No photo</div>
+                )}
+              </div>
+              <div className="card-body">
+                <div className="row">
+                  <button className="username btn ghost" type="button" onClick={() => navigate(`/profiles/${profile.id}`)}>
+                    {profile.username}
+                  </button>
+                  <StatusPill status={profile.reviewStatus} />
+                  <span className={`pill contact ${profile.contactStatus}`}>READY TO MESSAGE</span>
+                </div>
+                <div className="meta">
+                  <span>{profile.age ?? '?'} yrs</span>
+                  <span>{[profile.location, profile.country].filter(Boolean).join(', ') || 'Unknown location'}</span>
+                  <span>Last active: {formatActivity(profile.lastActivityAt)}</span>
+                </div>
+                <FactLine label="Photo Verified" value={profile.faceVerified} extra={factProvenance(profile, 'faceVerified')} />
+                <FactLine label="Children" value={profile.hasChildren} extra={factProvenance(profile, 'hasChildren')} />
+                <FactLine label="Marital" value={profile.maritalHistory} extra={factProvenance(profile, 'maritalHistory')} />
+                <ProbeDraft profile={profile} onChange={onProfileChange} title="Message draft" />
+              </div>
+            </article>
+          ))}
+        </section>
+      ) : (
+        <p className="muted">READY TO MESSAGE — none.</p>
       )}
       {preselected.length > 0 ? (
         <section className="action-block">

@@ -53,8 +53,8 @@ describe('local + stale workflow', () => {
   it('STALE_LOCAL_PROBE generates a draft with no network action', () => {
     const draft = generateStaleProbeDraft('Mexico City')
     assert.match(draft, /Mexico City/)
-    assert.match(draft, /still active/i)
-    assert.equal(/never married|children|religion|catholic/i.test(draft), false)
+    assert.match(draft, /still using this app/i)
+    assert.equal(/never married|children|religion|logged in|stale/i.test(draft), false)
   })
 })
 
@@ -132,8 +132,20 @@ describe('READY TO MESSAGE queue', () => {
       headline: 'Hello',
       bio: 'I like quiet weekends',
       occupation: 'nurse',
+      occupationConfidence: 'EXPLICIT',
+      facts: [
+        {
+          field: 'occupation',
+          value: 'nurse',
+          source: 'DESCRIPTION',
+          evidence: 'nurse',
+          confidence: 'EXPLICIT',
+        },
+      ],
     })
     assert.match(withJob, /nurse/i)
+    assert.match(withJob, /\?/)
+    assert.equal(/would you like to (chat|talk)/i.test(withJob), false)
     const withCity = generateOpeningDraft({
       username: 'BeaLocal',
       location: 'Manila',
@@ -142,6 +154,7 @@ describe('READY TO MESSAGE queue', () => {
       occupation: null,
     })
     assert.match(withCity, /Manila/)
+    assert.match(withCity, /\?/)
     const withHeadline = generateOpeningDraft({
       username: 'CoraLocal',
       location: null,
@@ -149,7 +162,8 @@ describe('READY TO MESSAGE queue', () => {
       bio: null,
       occupation: null,
     })
-    assert.match(withHeadline, /real|chat/i)
+    assert.match(withHeadline, /serious|real|hoping/i)
+    assert.equal(/would you like to (chat|talk)/i.test(withHeadline), false)
     assert.notEqual(withJob, withCity)
     for (const draft of [withJob, withCity, withHeadline]) {
       assert.equal(/children|kids|married|religion|catholic|logged in/i.test(draft), false)

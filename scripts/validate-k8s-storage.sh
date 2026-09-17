@@ -73,6 +73,20 @@ else
   echo "PASS: replicas 1"
 fi
 
+if ! grep -RIn 'tool4trip-tool4trip-forwardauth@kubernetescrd' "$DIR"/02-ingress.yaml >/dev/null; then
+  echo "FAIL: ForwardAuth middleware missing on Ingress"
+  FAIL=1
+else
+  echo "PASS: ForwardAuth middleware on Ingress"
+fi
+
+if ! grep -RIn 'AUTH_PROXY_HEADER' "$DIR"/00-deployment.yaml >/dev/null; then
+  echo "FAIL: AUTH_PROXY_HEADER missing"
+  FAIL=1
+else
+  echo "PASS: AUTH_PROXY_HEADER"
+fi
+
 if [ "$FAIL" -ne 0 ]; then
   echo "Kubernetes storage validation FAILED"
   exit 1

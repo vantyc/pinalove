@@ -261,6 +261,7 @@ describe('api + store', () => {
       const text = readFileSync(file, 'utf8')
       assert.equal(/sendmessage/i.test(text), false, file)
       assert.equal(/auto-send/i.test(text), false, file)
+      assert.equal(/playlikeuser|playhideuser|hideuser|blockuser|unlike/i.test(text), false, file)
     }
   })
 
@@ -387,5 +388,107 @@ describe('api + store', () => {
       body: JSON.stringify({ action: 'replied' }),
     })
     assert.equal((await replied.json()).contactStatus, 'REPLIED')
+  })
+
+  it('does not regenerate drafts after mark-sent or REPLIED', async () => {
+    const base = await listen()
+    const imported = await fetch(`${base}/pinalove/api/profiles/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        profiles: [
+          {
+            externalId: 'freeze-draft-1',
+            username: 'FreezeDraft',
+            profileUrl: 'https://www.pinalove.com/FreezeDraft',
+            source: 'PINALOVE',
+            location: 'Cebu',
+            country: 'PH',
+            lastActivityAt: '2026-09-16T12:00:00.000Z',
+            faceVerified: 'YES',
+            hasChildren: 'NO',
+            reviewStatus: 'PRESELECTED',
+          },
+        ],
+      }),
+    })
+    assert.equal((await imported.json()).imported, 1)
+    app.store.applyLocalWorkflow(Date.parse('2026-09-16T19:00:00.000Z'))
+    const listed = await (await fetch(`${base}/pinalove/api/profiles`)).json()
+    const row = listed.profiles.find((p: { username: string }) => p.username === 'FreezeDraft')
+    assert.ok(row.draftMessage)
+    const original = row.draftMessage
+    const sentRes = await fetch(`${base}/pinalove/api/profiles/${row.id}/contact`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'mark-sent' }),
+    })
+    const sent = await sentRes.json()
+    assert.equal(sent.contactStatus, 'PROBE_SENT')
+    assert.ok(sent.manuallySentAt)
+    app.store.applyLocalWorkflow(Date.parse('2026-09-16T20:00:00.000Z'))
+    const afterSent = app.store.getById(row.id)
+    assert.equal(afterSent?.draftMessage, original)
+    assert.equal(afterSent?.contactStatus, 'PROBE_SENT')
+
+    await fetch(`${base}/pinalove/api/profiles/${row.id}/contact`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'replied' }),
+    })
+    app.store.applyLocalWorkflow(Date.parse('2026-09-16T21:00:00.000Z'))
+    const afterReply = app.store.getById(row.id)
+    assert.equal(afterReply?.contactStatus, 'REPLIED')
+    assert.equal(afterReply?.draftMessage, original)
+  })
+
+  it('blocks anonymous HTML and API when AUTH_PROXY_HEADER is required', async () => {
+    const gatedDir = mkdtempSync(path.join(tmpdir(), 'pinalove-auth-'))
+    const gated = createApp({
+      sqlitePath: path.join(gatedDir, 'pinalove.sqlite'),
+      fixturesPath,
+      seedOnEmpty: true,
+      staticDir: dir,
+      authProxyHeader: 'X-Viajes-User',
+    })
+    const url: string = await new Promise((resolve) => {
+      gated.server.listen(0, '127.0.0.1', () => {
+        const addr = gated.server.address()
+        if (!addr || typeof addr === 'string') throw new Error('no addr')
+        resolve(`http://127.0.0.1:${addr.port}`)
+      })
+    })
+    try {
+      const home = await fetch(`${url}/pinalove/`, { redirect: 'manual' })
+      assert.equal(home.status, 302)
+      assert.equal(home.headers.get('location'), '/login')
+      const api = await fetch(`${url}/pinalove/api/profiles`)
+      assert.equal(api.status, 401)
+      const apiText = await api.text()
+      assert.equal(/demo_ana|username|draftMessage|primaryPhotoUrl/i.test(apiText), false)
+      const health = await fetch(`${url}/pinalove/healthz`)
+      assert.equal(health.status, 200)
+      const ok = await fetch(`${url}/pinalove/api/dashboard/stats`, {
+        headers: { 'X-Viajes-User': 'tester' },
+      })
+      assert.equal(ok.status, 200)
+      const stats = await ok.json()
+      assert.equal(typeof stats.total, 'number')
+    } finally {
+      gated.close()
+      rmSync(gatedDir, { recursive: true, force: true })
+    }
+  })
+
+  it('ingress and deploy keep ForwardAuth on /pinalove and /pinalove/api', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const ingress = readFileSync(join(process.cwd(), 'deploy/k3s/02-ingress.yaml'), 'utf8')
+    assert.match(ingress, /tool4trip-tool4trip-forwardauth@kubernetescrd/)
+    assert.match(ingress, /path: \/pinalove/)
+    assert.match(ingress, /pathType: Prefix/)
+    const deploy = readFileSync(join(process.cwd(), 'deploy/k3s/00-deployment.yaml'), 'utf8')
+    assert.match(deploy, /AUTH_PROXY_HEADER/)
+    assert.match(deploy, /X-Viajes-User/)
   })
 })

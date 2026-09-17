@@ -123,10 +123,14 @@ export function messageQueueRank(input: {
   return 3
 }
 
-/** Short natural probe. Does not assert unknown facts. Does not ask marital/kids/religion/age/inactivity. */
+/** Short activity check. Does not mention staleness, login dates, kids, marital, or religion. */
 export function generateStaleProbeDraft(location: string | null): string {
-  const city = (location ?? '').trim() || 'the same city'
-  return `Hi! I noticed you're in ${city} too 🙂 Are you still active here? It would be nice to get to know you.`
+  const raw = (location ?? '').trim()
+  const city = raw.split(',')[0]?.trim() || 'Mexico City'
+  if (/\b(unknown|stale|logged|inactive)\b/i.test(city)) {
+    return `Hi 🙂 I noticed you're in Mexico City too. Are you still using this app?`
+  }
+  return `Hi 🙂 I noticed you're in ${city} too. Are you still using this app?`
 }
 
 export function scoreShouldBeWithheld(input: {

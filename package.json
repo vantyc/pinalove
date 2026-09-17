@@ -11,7 +11,7 @@
     "start": "node dist/backend/src/index.js",
     "typecheck": "tsc -p tsconfig.build.json --noEmit && tsc -p frontend/tsconfig.json --noEmit && tsc -p reader/tsconfig.json --noEmit",
     "lint": "oxlint backend shared frontend scripts reader",
-    "test": "tsx --test shared/scoring.test.ts shared/classify.test.ts shared/localEnrichment.test.ts shared/workflow.test.ts shared/browseImport.test.ts backend/src/app.test.ts reader/src/reader.test.ts",
+    "test": "tsx --test shared/scoring.test.ts shared/classify.test.ts shared/localEnrichment.test.ts shared/workflow.test.ts shared/drafts.test.ts shared/browseImport.test.ts backend/src/app.test.ts reader/src/reader.test.ts",
     "validate:k8s": "bash scripts/validate-k8s-storage.sh",
     "preview": "vite preview --config frontend/vite.config.ts",
     "reader:login": "tsx reader/src/login.ts",

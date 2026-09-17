@@ -23,6 +23,9 @@ export type ServerOptions = {
   staticDir?: string
   seedOnEmpty?: boolean
   fixturesPath?: string
+  /** When set, every non-healthz request must carry this proxy header (ForwardAuth). */
+  authProxyHeader?: string
+  loginRedirect?: string
 }
 
 function envFlag(name: string, fallback: boolean): boolean {
@@ -40,6 +43,8 @@ export function createApp(opts: ServerOptions = {}) {
     opts.fixturesPath ??
     process.env.FIXTURES_PATH ??
     path.join(rootDir, 'fixtures/sample-profiles.json')
+  const authProxyHeader = (opts.authProxyHeader ?? process.env.AUTH_PROXY_HEADER ?? '').trim()
+  const loginRedirect = opts.loginRedirect ?? process.env.LOGIN_REDIRECT ?? '/login'
 
   const db = openDatabase(sqlitePath)
   const store = new ProfileStore(db)
@@ -68,9 +73,29 @@ export function createApp(opts: ServerOptions = {}) {
     }
 
     if (method === 'GET' && (pathname === `${BASE_PATH}/healthz` || pathname === '/healthz')) {
-      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
+      res.writeHead(200, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-store',
+      })
       res.end('ok\n')
       return
+    }
+
+    if (authProxyHeader) {
+      const raw = req.headers[authProxyHeader.toLowerCase()]
+      const value = Array.isArray(raw) ? raw[0] : raw
+      if (!value || !String(value).trim()) {
+        if (pathname.startsWith(`${BASE_PATH}/api/`)) {
+          sendJson(res, 401, { error: 'unauthorized' })
+          return
+        }
+        res.writeHead(302, {
+          Location: loginRedirect,
+          'Cache-Control': 'no-store',
+        })
+        res.end()
+        return
+      }
     }
 
     if (pathname === BASE_PATH || pathname === `${BASE_PATH}/`) {
@@ -303,7 +328,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const raw = JSON.stringify(body)
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store',
+    'Cache-Control': 'private, no-store, no-cache, must-revalidate',
   })
   res.end(raw)
 }
@@ -354,7 +379,9 @@ function serveStatic(res: ServerResponse, staticDir: string, urlPath: string): b
   const immutable = rel.startsWith('assets/')
   res.writeHead(200, {
     'Content-Type': MIME[ext] ?? 'application/octet-stream',
-    'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
+    'Cache-Control': immutable
+      ? 'private, max-age=31536000, immutable'
+      : 'private, no-store, no-cache, must-revalidate',
   })
   res.end(readFileSync(abs))
   return true
@@ -368,7 +395,7 @@ function serveSpa(res: ServerResponse, staticDir: string): void {
   }
   res.writeHead(200, {
     'Content-Type': 'text/html; charset=utf-8',
-    'Cache-Control': 'no-cache',
+    'Cache-Control': 'private, no-store, no-cache, must-revalidate',
   })
   res.end(readFileSync(index))
 }

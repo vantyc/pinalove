@@ -448,19 +448,32 @@ export class ProfileStore {
       })
       let draft = profile.draftMessage
       let draftAt = profile.draftCreatedAt
-      if (assigned.contactStatus === 'STALE_LOCAL_PROBE' && profile.contactStatus !== 'PROBE_SENT') {
+      const freezeDraft =
+        Boolean(profile.manuallySentAt) ||
+        profile.contactStatus === 'PROBE_SENT' ||
+        profile.contactStatus === 'REPLIED' ||
+        profile.contactStatus === 'NO_RESPONSE' ||
+        assigned.contactStatus === 'PROBE_SENT' ||
+        assigned.contactStatus === 'REPLIED' ||
+        assigned.contactStatus === 'NO_RESPONSE'
+      if (!freezeDraft && assigned.contactStatus === 'STALE_LOCAL_PROBE') {
         draft = generateStaleProbeDraft(profile.location)
-        draftAt = draftAt ?? ts
+        draftAt = ts
       }
-      if (assigned.contactStatus === 'READY_TO_CONTACT' && profile.contactStatus !== 'PROBE_SENT') {
+      if (!freezeDraft && assigned.contactStatus === 'READY_TO_CONTACT') {
+        const occupationFact = profile.facts.find(
+          (f) => f.field === 'occupation' && f.confidence === 'EXPLICIT',
+        )
         draft = generateOpeningDraft({
           username: profile.username,
           location: profile.location,
           headline: profile.headline,
           bio: profile.bio,
-          occupation: profile.occupation,
+          occupation: typeof occupationFact?.value === 'string' ? occupationFact.value : null,
+          occupationConfidence: occupationFact?.confidence ?? null,
+          facts: profile.facts,
         })
-        draftAt = draftAt ?? ts
+        draftAt = ts
       }
       stmt.run(
         assigned.contactStatus,

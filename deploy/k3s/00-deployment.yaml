@@ -60,6 +60,10 @@ spec:
               value: "1"
             - name: APP_ROOT
               value: /app
+            - name: AUTH_PROXY_HEADER
+              value: X-Viajes-User
+            - name: LOGIN_REDIRECT
+              value: /login
           volumeMounts:
             - name: pinalove-data
               mountPath: /data

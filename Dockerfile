@@ -20,6 +20,8 @@ ENV SQLITE_PATH=/data/pinalove.sqlite
 ENV STATIC_DIR=/app/dist/frontend
 ENV FIXTURES_PATH=/app/fixtures/sample-profiles.json
 ENV SEED_ON_EMPTY=1
+ENV AUTH_PROXY_HEADER=X-Viajes-User
+ENV LOGIN_REDIRECT=/login
 
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
