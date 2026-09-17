@@ -66,6 +66,13 @@ CREATE TABLE IF NOT EXISTS profiles (
   uncertainty_reasons TEXT NOT NULL DEFAULT '[]',
   sources TEXT NOT NULL DEFAULT '[]',
   activity_category TEXT,
+  last_inbound_at TEXT,
+  last_outbound_at TEXT,
+  inbound_unread INTEGER NOT NULL DEFAULT 0,
+  last_inbound_preview TEXT,
+  conversation_needs_reply INTEGER NOT NULL DEFAULT 0,
+  inbox_identity TEXT,
+  inbox_mail_id TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -125,6 +132,13 @@ const PROFILE_MIGRATIONS: { name: string; ddl: string }[] = [
   { name: 'uncertainty_reasons', ddl: "TEXT NOT NULL DEFAULT '[]'" },
   { name: 'sources', ddl: "TEXT NOT NULL DEFAULT '[]'" },
   { name: 'activity_category', ddl: 'TEXT' },
+  { name: 'last_inbound_at', ddl: 'TEXT' },
+  { name: 'last_outbound_at', ddl: 'TEXT' },
+  { name: 'inbound_unread', ddl: 'INTEGER NOT NULL DEFAULT 0' },
+  { name: 'last_inbound_preview', ddl: 'TEXT' },
+  { name: 'conversation_needs_reply', ddl: 'INTEGER NOT NULL DEFAULT 0' },
+  { name: 'inbox_identity', ddl: 'TEXT' },
+  { name: 'inbox_mail_id', ddl: 'TEXT' },
 ]
 
 function migrateProfiles(db: DatabaseSync): void {
@@ -137,6 +151,9 @@ function migrateProfiles(db: DatabaseSync): void {
   db.exec('DROP INDEX IF EXISTS idx_profiles_external_id')
   db.exec(
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_external_id ON profiles(external_id) WHERE external_id IS NOT NULL',
+  )
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_inbox_identity ON profiles(inbox_identity) WHERE inbox_identity IS NOT NULL',
   )
 }
 

@@ -7,6 +7,13 @@ import { interpretDistance } from '../../shared/geo.ts'
 import { activityCategory } from '../../shared/activity.ts'
 import { assignContact, generateStaleProbeDraft } from '../../shared/workflow.ts'
 import { generateOpeningDraft } from '../../shared/drafts.ts'
+import {
+  inboxIdentityFromUsername,
+  inboundAtFromMailbox,
+  mailboxNeedsReply,
+  mailboxProfileUrl,
+  type MailboxNewItem,
+} from '../../shared/inbox.ts'
 import type {
   ActivityCategory,
   ContactStatus,
@@ -93,6 +100,13 @@ type ProfileRow = {
   uncertainty_reasons: string | null
   sources: string | null
   activity_category: ActivityCategory | null
+  last_inbound_at: string | null
+  last_outbound_at: string | null
+  inbound_unread: number | null
+  last_inbound_preview: string | null
+  conversation_needs_reply: number | null
+  inbox_identity: string | null
+  inbox_mail_id: string | null
   created_at: string
   updated_at: string
 }
@@ -113,6 +127,11 @@ function mergeSources(existing: ProfileSource[] | undefined, incoming: ProfileSo
   const next = existing ? [...existing] : []
   if (!next.includes(incoming)) next.push(incoming)
   return next
+}
+
+function isInboxOnly(profile: Pick<Profile, 'source' | 'sources'>): boolean {
+  const sources = profile.sources.length > 0 ? profile.sources : [profile.source]
+  return sources.length > 0 && sources.every((s) => s === 'PINALOVE_INBOX')
 }
 
 function sourcesFromRow(row: ProfileRow): ProfileSource[] {
@@ -185,6 +204,13 @@ function rowToProfile(row: ProfileRow): Profile {
     repliedAt: row.replied_at ?? null,
     lastHumanActionAt: row.last_human_action_at ?? null,
     contactNotes: row.contact_notes ?? null,
+    lastInboundAt: row.last_inbound_at ?? null,
+    lastOutboundAt: row.last_outbound_at ?? null,
+    inboundUnread: Boolean(row.inbound_unread),
+    lastInboundPreview: row.last_inbound_preview ?? null,
+    conversationNeedsReply: Boolean(row.conversation_needs_reply),
+    inboxIdentity: row.inbox_identity ?? null,
+    inboxMailId: row.inbox_mail_id ?? null,
     logisticPriority: row.logistic_priority === 'LOCAL' ? 'HIGH_LOCAL' : (row.logistic_priority ?? 'NONE'),
     priorityReasons: parseJson<string[]>(row.priority_reasons ?? '[]', []),
     uncertaintyReasons: parseJson<string[]>(row.uncertainty_reasons ?? '[]', []),
@@ -336,13 +362,17 @@ export class ProfileStore {
       staleLocalProbe: profiles.filter((p) => p.contactStatus === 'STALE_LOCAL_PROBE').length,
       readyToContact: profiles.filter((p) => p.contactStatus === 'READY_TO_CONTACT').length,
       probeSent: profiles.filter((p) => p.contactStatus === 'PROBE_SENT').length,
+      messageSent: profiles.filter((p) => p.contactStatus === 'MESSAGE_SENT').length,
+      needsReply: profiles.filter((p) => p.conversationNeedsReply).length,
       actionRequired: profiles.filter((p) => {
+        if (p.conversationNeedsReply) return true
         if (p.reviewStatus === 'DISCARDED') return false
         if (p.contactStatus === 'STALE_LOCAL_PROBE') return true
         if (p.contactStatus === 'READY_TO_CONTACT') return true
         if (
           p.reviewStatus === 'PRESELECTED' &&
           p.contactStatus !== 'PROBE_SENT' &&
+          p.contactStatus !== 'MESSAGE_SENT' &&
           p.contactStatus !== 'REPLIED'
         ) {
           return true
@@ -439,11 +469,14 @@ export class ProfileStore {
       faceVerified: current.faceVerified,
       hasChildren: current.hasChildren,
       now,
+      inboxOnly: isInboxOnly(current),
     })
     let contactStatus = assigned.contactStatus
     if (current.repliedAt) contactStatus = 'REPLIED'
-    else if (current.manuallySentAt) contactStatus = 'PROBE_SENT'
-    const freezeDraft = Boolean(current.manuallySentAt) || contactStatus === 'REPLIED' || contactStatus === 'NO_RESPONSE' || contactStatus === 'PROBE_SENT'
+    else if (current.manuallySentAt) {
+      contactStatus = assigned.contactStatus === 'STALE_LOCAL_PROBE' ? 'PROBE_SENT' : 'MESSAGE_SENT'
+    }
+    const freezeDraft = Boolean(current.manuallySentAt) || contactStatus === 'REPLIED' || contactStatus === 'NO_RESPONSE' || contactStatus === 'PROBE_SENT' || contactStatus === 'MESSAGE_SENT'
     let draft = current.draftMessage
     let draftAt = current.draftCreatedAt
     if (!freezeDraft && contactStatus === 'STALE_LOCAL_PROBE') {
@@ -548,15 +581,19 @@ export class ProfileStore {
         faceVerified: profile.faceVerified,
         hasChildren: profile.hasChildren,
         now,
+        inboxOnly: isInboxOnly(profile),
       })
       let draft = profile.draftMessage
       let draftAt = profile.draftCreatedAt
       const freezeDraft =
+        isInboxOnly(profile) ||
         Boolean(profile.manuallySentAt) ||
         profile.contactStatus === 'PROBE_SENT' ||
+        profile.contactStatus === 'MESSAGE_SENT' ||
         profile.contactStatus === 'REPLIED' ||
         profile.contactStatus === 'NO_RESPONSE' ||
         assigned.contactStatus === 'PROBE_SENT' ||
+        assigned.contactStatus === 'MESSAGE_SENT' ||
         assigned.contactStatus === 'REPLIED' ||
         assigned.contactStatus === 'NO_RESPONSE'
       if (!freezeDraft && assigned.contactStatus === 'STALE_LOCAL_PROBE') {
@@ -603,13 +640,15 @@ export class ProfileStore {
     const current = this.getById(id)
     if (!current) return null
     const ts = nowIso()
+    const status: ContactStatus =
+      current.contactStatus === 'STALE_LOCAL_PROBE' ? 'PROBE_SENT' : 'MESSAGE_SENT'
     this.db
       .prepare(
         `UPDATE profiles SET
-          contact_status = ?, manually_sent_at = ?, last_human_action_at = ?, updated_at = ?
+          contact_status = ?, manually_sent_at = ?, last_outbound_at = ?, last_human_action_at = ?, updated_at = ?
          WHERE id = ?`,
       )
-      .run('PROBE_SENT', ts, ts, ts, id)
+      .run(status, ts, ts, ts, ts, id)
     this.appendLog(id, current.reviewStatus, current.reviewStatus, 'marked as sent (manual, local only)', 'USER', ts)
     return this.getById(id)
   }
@@ -619,13 +658,14 @@ export class ProfileStore {
     if (!current) return null
     const ts = nowIso()
     const repliedAt = outcome === 'REPLIED' ? ts : current.repliedAt
+    const needsReply = outcome === 'REPLIED' ? 0 : current.conversationNeedsReply ? 1 : 0
     this.db
       .prepare(
         `UPDATE profiles SET
-          contact_status = ?, replied_at = ?, last_human_action_at = ?, updated_at = ?
+          contact_status = ?, replied_at = ?, conversation_needs_reply = ?, last_human_action_at = ?, updated_at = ?
          WHERE id = ?`,
       )
-      .run(outcome, repliedAt, ts, ts, id)
+      .run(outcome, repliedAt, needsReply, ts, ts, id)
     this.appendLog(
       id,
       current.reviewStatus,
@@ -635,6 +675,148 @@ export class ProfileStore {
       ts,
     )
     return this.getById(id)
+  }
+
+  /** Hide a thread from REPLIES. SQLite only. Does not mark PinaLove as read. */
+  archiveInbox(id: string): Profile | null {
+    const current = this.getById(id)
+    if (!current) return null
+    const ts = nowIso()
+    this.db
+      .prepare(
+        `UPDATE profiles SET
+          conversation_needs_reply = 0, inbound_unread = 0,
+          last_human_action_at = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(ts, ts, id)
+    this.appendLog(
+      id,
+      current.reviewStatus,
+      current.reviewStatus,
+      'archived inbox thread (manual, local only)',
+      'USER',
+      ts,
+    )
+    return this.getById(id)
+  }
+
+  ingestMailbox(items: MailboxNewItem[], now = Date.now()): {
+    messages: number
+    merged: number
+    inserted: number
+    skipped: number
+    senders: string[]
+    needsReply: number
+  } {
+    const result = {
+      messages: items.length,
+      merged: 0,
+      inserted: 0,
+      skipped: 0,
+      senders: [] as string[],
+      needsReply: 0,
+    }
+    const ts = new Date(now).toISOString()
+    this.db.exec('BEGIN')
+    try {
+      for (const item of items) {
+        const username = item.username.trim()
+        if (!username) {
+          result.skipped += 1
+          continue
+        }
+        const identity = inboxIdentityFromUsername(username)
+        const inboundAt = inboundAtFromMailbox(item)
+        const existing = this.findByUsername(username)
+        const lastOutbound = existing?.lastOutboundAt ?? existing?.manuallySentAt ?? null
+        const needsReply = mailboxNeedsReply(item, lastOutbound)
+        if (needsReply) result.needsReply += 1
+        result.senders.push(username)
+        if (existing) {
+          const sources = mergeSources(existing.sources, 'PINALOVE_INBOX')
+          this.db
+            .prepare(
+              `UPDATE profiles SET
+                last_inbound_at = ?, inbound_unread = ?, last_inbound_preview = ?,
+                conversation_needs_reply = ?, inbox_identity = COALESCE(inbox_identity, ?),
+                inbox_mail_id = ?, last_seen_at = ?, sources = ?,
+                primary_photo_url = COALESCE(primary_photo_url, ?),
+                updated_at = ?
+               WHERE id = ?`,
+            )
+            .run(
+              inboundAt,
+              item.unread ? 1 : 0,
+              item.text,
+              needsReply ? 1 : 0,
+              identity,
+              item.mailid,
+              ts,
+              JSON.stringify(sources),
+              item.primaryPhotoUrl,
+              ts,
+              existing.id,
+            )
+          result.merged += 1
+          continue
+        }
+        const id = randomUUID()
+        this.db
+          .prepare(
+            `INSERT INTO profiles (
+              id, external_id, username, profile_url, primary_photo_url,
+              age, location, country,
+              relationship_status, marital_history, has_children, wants_children,
+              religion_practice_level, photo_verified, profile_verified,
+              source, sources, scraped_at, last_seen_at, last_activity_at,
+              review_status, decision, score_reasons, flags,
+              gender, face_verified, field_facts, classification_reasons, missing_detail,
+              facts, text_signals, data_conflicts, contact_status,
+              last_inbound_at, inbound_unread, last_inbound_preview, conversation_needs_reply,
+              inbox_identity, inbox_mail_id, created_at, updated_at
+            ) VALUES (
+              ?, NULL, ?, ?, ?,
+              ?, ?, NULL,
+              'UNKNOWN', 'UNKNOWN', 'UNKNOWN', 'UNKNOWN',
+              'UNKNOWN', 0, 0,
+              'PINALOVE_INBOX', ?, ?, ?, ?,
+              'UNREVIEWED', 'NONE', '[]', '[]',
+              ?, 'UNKNOWN', '{}', '[]', '[]',
+              '[]', '[]', '[]', 'NONE',
+              ?, ?, ?, ?,
+              ?, ?, ?, ?
+            )`,
+          )
+          .run(
+            id,
+            username,
+            mailboxProfileUrl(username),
+            item.primaryPhotoUrl,
+            item.age,
+            item.city,
+            JSON.stringify(['PINALOVE_INBOX']),
+            ts,
+            ts,
+            inboundAtFromMailbox({ time: null, lastactivity: item.lastactivity }),
+            item.gender,
+            inboundAt,
+            item.unread ? 1 : 0,
+            item.text,
+            needsReply ? 1 : 0,
+            identity,
+            item.mailid,
+            ts,
+            ts,
+          )
+        result.inserted += 1
+      }
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+    return result
   }
 
   updateContactNotes(id: string, notes: string | null): Profile | null {
@@ -866,6 +1048,13 @@ export class ProfileStore {
       repliedAt: existing?.repliedAt ?? null,
       lastHumanActionAt: existing?.lastHumanActionAt ?? null,
       contactNotes: existing?.contactNotes ?? null,
+      lastInboundAt: existing?.lastInboundAt ?? null,
+      lastOutboundAt: existing?.lastOutboundAt ?? null,
+      inboundUnread: existing?.inboundUnread ?? false,
+      lastInboundPreview: existing?.lastInboundPreview ?? null,
+      conversationNeedsReply: existing?.conversationNeedsReply ?? false,
+      inboxIdentity: existing?.inboxIdentity ?? null,
+      inboxMailId: existing?.inboxMailId ?? null,
       logisticPriority: existing?.logisticPriority ?? 'NONE',
       priorityReasons: existing?.priorityReasons ?? [],
       uncertaintyReasons: existing?.uncertaintyReasons ?? [],
@@ -1001,6 +1190,20 @@ export class ProfileStore {
       )
     }
     return 'updated'
+  }
+
+  private findByUsername(username: string): Profile | null {
+    const rows = this.db
+      .prepare('SELECT * FROM profiles WHERE username = ? COLLATE NOCASE')
+      .all(username) as ProfileRow[]
+    if (rows.length === 0) return null
+    const ranked = [...rows].sort((a, b) => {
+      const aInbox = a.source === 'PINALOVE_INBOX'
+      const bInbox = b.source === 'PINALOVE_INBOX'
+      if (aInbox !== bInbox) return aInbox ? 1 : -1
+      return a.created_at.localeCompare(b.created_at)
+    })
+    return rowToProfile(ranked[0]!)
   }
 
   private findExisting(

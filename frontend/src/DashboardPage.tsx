@@ -21,9 +21,16 @@ export function DashboardPage() {
     void load()
   }, [])
 
-  const stale = all.filter((p) => p.contactStatus === 'STALE_LOCAL_PROBE')
+  const replies = all
+    .filter((p) => p.conversationNeedsReply)
+    .sort((a, b) => {
+      const ta = Date.parse(a.lastInboundAt ?? '') || 0
+      const tb = Date.parse(b.lastInboundAt ?? '') || 0
+      return tb - ta
+    })
+  const stale = all.filter((p) => p.contactStatus === 'STALE_LOCAL_PROBE' && !p.conversationNeedsReply)
   const ready = all
-    .filter((p) => p.contactStatus === 'READY_TO_CONTACT')
+    .filter((p) => p.contactStatus === 'READY_TO_CONTACT' && !p.conversationNeedsReply)
     .sort((a, b) => {
       const ra = messageQueueRank(a) ?? 9
       const rb = messageQueueRank(b) ?? 9
@@ -33,13 +40,16 @@ export function DashboardPage() {
   const preselected = all.filter(
     (p) =>
       p.reviewStatus === 'PRESELECTED' &&
+      !p.conversationNeedsReply &&
       p.contactStatus !== 'READY_TO_CONTACT' &&
       p.contactStatus !== 'PROBE_SENT' &&
+      p.contactStatus !== 'MESSAGE_SENT' &&
       p.contactStatus !== 'REPLIED',
   )
   const needsDetail = all.filter(
     (p) =>
       p.reviewStatus === 'NEEDS_DETAIL' &&
+      !p.conversationNeedsReply &&
       p.contactStatus !== 'STALE_LOCAL_PROBE' &&
       p.contactStatus !== 'READY_TO_CONTACT',
   )
@@ -51,6 +61,10 @@ export function DashboardPage() {
         <div className="stat">
           <strong>{stats?.actionRequired ?? '—'}</strong>
           <span>Action required</span>
+        </div>
+        <div className="stat">
+          <strong>{stats?.needsReply ?? '—'}</strong>
+          <span>Needs reply</span>
         </div>
         <div className="stat">
           <strong>{stats?.readyToContact ?? '—'}</strong>
@@ -81,6 +95,7 @@ export function DashboardPage() {
         </p>
       ) : null}
       <ActionRequiredList
+        replies={replies}
         ready={ready}
         stale={stale}
         preselected={preselected}

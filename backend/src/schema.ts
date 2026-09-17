@@ -86,7 +86,7 @@ export const decisionPatchSchema = z.object({
 })
 
 export const contactPatchSchema = z.object({
-  action: z.enum(['mark-sent', 'notes', 'replied', 'no-response', 'discard', 'restore']),
+  action: z.enum(['mark-sent', 'notes', 'replied', 'no-response', 'discard', 'restore', 'archive']),
   notes: z.string().nullable().optional(),
 })
 

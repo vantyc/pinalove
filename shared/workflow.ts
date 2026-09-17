@@ -11,6 +11,8 @@ export type WorkflowInput = {
   faceVerified?: Tristate | null
   hasChildren?: Tristate | null
   now?: number
+  /** Inbox-only rows must not enter READY/PROBE queues. */
+  inboxOnly?: boolean
 }
 
 export type WorkflowAssignment = {
@@ -22,7 +24,12 @@ export type WorkflowAssignment = {
   uncertaintyReasons: string[]
 }
 
-const TERMINAL_CONTACT: ReadonlySet<ContactStatus> = new Set(['PROBE_SENT', 'REPLIED', 'NO_RESPONSE'])
+const TERMINAL_CONTACT: ReadonlySet<ContactStatus> = new Set([
+  'PROBE_SENT',
+  'MESSAGE_SENT',
+  'REPLIED',
+  'NO_RESPONSE',
+])
 
 function highLocal(local: boolean): LogisticPriority {
   return local ? 'HIGH_LOCAL' : 'NONE'
@@ -48,6 +55,17 @@ export function assignContact(input: WorkflowInput): WorkflowAssignment {
   if (TERMINAL_CONTACT.has(previous)) {
     return {
       contactStatus: previous,
+      logisticPriority: highLocal(local),
+      stale,
+      local,
+      priorityReasons,
+      uncertaintyReasons,
+    }
+  }
+
+  if (input.inboxOnly) {
+    return {
+      contactStatus: 'NONE',
       logisticPriority: highLocal(local),
       stale,
       local,
@@ -108,6 +126,39 @@ export function assignContact(input: WorkflowInput): WorkflowAssignment {
     priorityReasons,
     uncertaintyReasons,
   }
+}
+
+/**
+ * Inbox needs a human reply when the latest inbound is after the last known outbound.
+ * Does not send. Does not invent REPLIED.
+ */
+export function conversationNeedsReply(input: {
+  lastInboundAt: string | null
+  lastOutboundAt?: string | null
+  manuallySentAt?: string | null
+}): boolean {
+  if (!input.lastInboundAt) return false
+  const inbound = Date.parse(input.lastInboundAt)
+  if (Number.isNaN(inbound)) return false
+  const outboundRaw = input.lastOutboundAt ?? input.manuallySentAt ?? null
+  if (!outboundRaw) return true
+  const outbound = Date.parse(outboundRaw)
+  if (Number.isNaN(outbound)) return true
+  return inbound > outbound
+}
+
+/** Dashboard order: replies, probes, ready, needs detail, discarded. */
+export function dashboardSectionRank(input: {
+  conversationNeedsReply?: boolean
+  contactStatus: ContactStatus
+  reviewStatus: ReviewStatus
+}): 1 | 2 | 3 | 4 | 5 | null {
+  if (input.conversationNeedsReply) return 1
+  if (input.contactStatus === 'STALE_LOCAL_PROBE') return 2
+  if (input.contactStatus === 'READY_TO_CONTACT') return 3
+  if (input.reviewStatus === 'NEEDS_DETAIL') return 4
+  if (input.reviewStatus === 'DISCARDED') return 5
+  return null
 }
 
 /** 1 = PRESELECTED, 2 = photo verified + children NO, 3 = other ready matches. */

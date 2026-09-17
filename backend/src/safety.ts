@@ -23,6 +23,11 @@ export const FORBIDDEN_PATH_FRAGMENTS = [
   'blockuser',
   'editmyprofilenew',
   'updatemyprofile',
+  'markasread',
+  'mailboxnew',
+  'convonew',
+  'readreceipt',
+  'broadcastinchat',
 ] as const
 
 export function isForbiddenApiPath(pathname: string): boolean {

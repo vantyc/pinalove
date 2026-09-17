@@ -18,6 +18,7 @@ export const CONTACT_STATUSES = [
   'STALE_LOCAL_PROBE',
   'READY_TO_CONTACT',
   'PROBE_SENT',
+  'MESSAGE_SENT',
   'REPLIED',
   'NO_RESPONSE',
 ] as const
@@ -93,6 +94,7 @@ export const PROFILE_SOURCES = [
   'PINALOVE',
   'PINALOVE_MATCH',
   'PINALOVE_BROWSE',
+  'PINALOVE_INBOX',
   'MOCK',
 ] as const
 export type ProfileSource = (typeof PROFILE_SOURCES)[number]
@@ -224,6 +226,13 @@ export type Profile = {
   repliedAt: string | null
   lastHumanActionAt: string | null
   contactNotes: string | null
+  lastInboundAt: string | null
+  lastOutboundAt: string | null
+  inboundUnread: boolean
+  lastInboundPreview: string | null
+  conversationNeedsReply: boolean
+  inboxIdentity: string | null
+  inboxMailId: string | null
   logisticPriority: LogisticPriority
   priorityReasons: string[]
   uncertaintyReasons: string[]
@@ -300,6 +309,8 @@ export type DashboardStats = {
   staleLocalProbe: number
   readyToContact: number
   probeSent: number
+  messageSent: number
+  needsReply: number
   actionRequired: number
 }
 

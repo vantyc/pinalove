@@ -5,8 +5,10 @@
  * not a bulk ingestion strategy. Keep it allowlisted; do not loop it.
  * browsenew is an approved read-only diagnostic/enrichment capability,
  * not a bulk ingestion strategy. Keep it allowlisted; do not loop it.
+ * mailboxnew is an approved read-only diagnostic for Inbox/Unread listing.
+ * Do not loop it. Do not open conversations. Do not mark as read.
  */
-export const ALLOWED_READ_ACTIONS = ['listsnew', 'profilenew', 'browsenew'] as const
+export const ALLOWED_READ_ACTIONS = ['listsnew', 'profilenew', 'browsenew', 'mailboxnew'] as const
 export type AllowedReadAction = (typeof ALLOWED_READ_ACTIONS)[number]
 
 export const FORBIDDEN_ACTIONS = [
@@ -39,6 +41,11 @@ export const FORBIDDEN_ACTIONS = [
   'boostbuy',
   'booststart',
   'boostpause',
+  'broadcastinchat',
+  'broadcastleftchat',
+  'readreceipt',
+  'typing',
+  'stoptyping',
 ] as const
 export type ForbiddenAction = (typeof FORBIDDEN_ACTIONS)[number]
 
@@ -49,7 +56,7 @@ export function isAllowedReadAction(action: string): action is AllowedReadAction
 export function assertAllowedReadAction(action: string): asserts action is AllowedReadAction {
   if (isAllowedReadAction(action)) return
   throw new ReaderSafetyError(
-    `Blocked PinaLove action "${action}". Reader allowlist is read-only (listsnew, profilenew, browsenew).`,
+    `Blocked PinaLove action "${action}". Reader allowlist is read-only (listsnew, profilenew, browsenew, mailboxnew).`,
   )
 }
 

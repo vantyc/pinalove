@@ -16,7 +16,7 @@ export function ProbeDraft({
 }) {
   const discarded = profile.reviewStatus === 'DISCARDED'
   const draft = profile.draftMessage
-  const sent = profile.contactStatus === 'PROBE_SENT'
+  const sent = profile.contactStatus === 'PROBE_SENT' || profile.contactStatus === 'MESSAGE_SENT'
   const terminal = profile.contactStatus === 'REPLIED' || profile.contactStatus === 'NO_RESPONSE'
   const actionable = !discarded
 

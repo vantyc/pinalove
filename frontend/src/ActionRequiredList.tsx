@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import type { Profile } from '../../shared/types.ts'
 import { FlagList, StatusPill } from './FlagList'
 import { ProbeDraft } from './ProbeDraft'
+import { patchContact } from './api'
 
 function formatActivity(iso: string | null): string {
   if (!iso) return 'UNKNOWN'
@@ -47,6 +48,7 @@ function FactLine({ label, value, extra }: { label: string; value: string; extra
 }
 
 export function ActionRequiredList({
+  replies = [],
   ready,
   stale,
   preselected,
@@ -54,6 +56,7 @@ export function ActionRequiredList({
   discarded,
   onProfileChange,
 }: {
+  replies?: Profile[]
   ready: Profile[]
   stale: Profile[]
   preselected: Profile[]
@@ -66,9 +69,72 @@ export function ActionRequiredList({
     <div>
       <h2>Action required</h2>
       <p className="muted">What needs attention, in order. Review first; contacting is optional and always manual.</p>
-      {ready.length === 0 && stale.length === 0 && preselected.length === 0 && needsDetail.length === 0 ? (
+      {replies.length === 0 && ready.length === 0 && stale.length === 0 && preselected.length === 0 && needsDetail.length === 0 ? (
         <p className="empty">Nothing in the action queue.</p>
       ) : null}
+      {replies.length > 0 ? (
+        <section className="action-block">
+          <h3>REPLIES / INBOX</h3>
+          <p className="muted">Women who wrote to you — reply manually in PinaLove. This app never sends.</p>
+          {replies.map((profile) => (
+            <article className="card action-card" key={profile.id}>
+              <div className="photo">
+                {profile.primaryPhotoUrl ? (
+                  <img src={profile.primaryPhotoUrl} alt="" />
+                ) : (
+                  <div className="photo-placeholder">No photo</div>
+                )}
+              </div>
+              <div className="card-body">
+                <div className="row">
+                  <button className="username btn ghost" type="button" onClick={() => navigate(`/profiles/${profile.id}`)}>
+                    {profile.username}
+                  </button>
+                  <StatusPill status={profile.reviewStatus} />
+                  <span className="pill contact REPLIED">NEEDS REPLY</span>
+                </div>
+                <div className="meta">
+                  <span>{profile.age ?? '?'} yrs</span>
+                  <span>{[profile.location, profile.country].filter(Boolean).join(', ') || 'Unknown location'}</span>
+                  <span>Wrote: {formatActivity(profile.lastInboundAt)}</span>
+                  {profile.inboundUnread ? <span>unread</span> : null}
+                </div>
+                {profile.lastInboundPreview ? (
+                  <p className="message-box">{profile.lastInboundPreview}</p>
+                ) : (
+                  <p className="muted">No preview stored yet.</p>
+                )}
+                <div className="actions" style={{ marginTop: '0.7rem' }}>
+                  <a className="btn primary" href={profile.profileUrl} target="_blank" rel="noreferrer">
+                    Open conversation
+                  </a>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => {
+                      void patchContact(profile.id, { action: 'replied' }).then(onProfileChange)
+                    }}
+                  >
+                    Mark replied
+                  </button>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => {
+                      if (!window.confirm('Archive this thread locally? PinaLove will not be changed.')) return
+                      void patchContact(profile.id, { action: 'archive' }).then(onProfileChange)
+                    }}
+                  >
+                    Ignore / Archive
+                  </button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </section>
+      ) : (
+        <p className="muted">REPLIES / INBOX — none stored locally yet.</p>
+      )}
       {stale.length > 0 ? (
         <section className="action-block">
           <h3>LOCAL PROBES</h3>

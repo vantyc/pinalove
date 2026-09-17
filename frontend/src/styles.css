@@ -407,7 +407,8 @@ ul.reasons {
   color: var(--ok);
 }
 
-.pill.contact.PROBE_SENT {
+.pill.contact.PROBE_SENT,
+.pill.contact.MESSAGE_SENT {
   background: #2a2430;
   color: var(--info);
 }

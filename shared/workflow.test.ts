@@ -5,7 +5,7 @@ import { maritalFromProfileNewStatus } from './profileNew.ts'
 import { extractExplicitDeclarations } from './localEnrichment.ts'
 import { classifyListsNewMatch } from './classify.ts'
 import { evaluateProfile } from './scoring.ts'
-import { assignContact, generateStaleProbeDraft, messageQueueRank, scoreShouldBeWithheld } from './workflow.ts'
+import { assignContact, conversationNeedsReply, dashboardSectionRank, generateStaleProbeDraft, messageQueueRank, scoreShouldBeWithheld } from './workflow.ts'
 import { generateOpeningDraft } from './drafts.ts'
 
 const staleIso = '2025-09-16T12:00:00.000Z'
@@ -269,6 +269,83 @@ describe('distanceRaw anomalies', () => {
       primaryPhotoUrl: 'https://example.com/p.jpg',
     })
     assert.equal(leakedRaw.reasons.some((r) => r.code === 'proximity'), false)
+  })
+})
+
+describe('inbox conversationNeedsReply', () => {
+  it('is true when inbound is after the last outbound', () => {
+    assert.equal(
+      conversationNeedsReply({
+        lastInboundAt: '2026-09-16T18:00:00.000Z',
+        lastOutboundAt: '2026-09-16T12:00:00.000Z',
+      }),
+      true,
+    )
+    assert.equal(
+      conversationNeedsReply({
+        lastInboundAt: '2026-09-16T10:00:00.000Z',
+        lastOutboundAt: '2026-09-16T12:00:00.000Z',
+      }),
+      false,
+    )
+    assert.equal(conversationNeedsReply({ lastInboundAt: null, lastOutboundAt: '2026-09-16T12:00:00.000Z' }), false)
+    assert.equal(conversationNeedsReply({ lastInboundAt: '2026-09-16T18:00:00.000Z', lastOutboundAt: null }), true)
+  })
+
+  it('ranks replies above probes and ready', () => {
+    assert.equal(
+      dashboardSectionRank({
+        conversationNeedsReply: true,
+        contactStatus: 'READY_TO_CONTACT',
+        reviewStatus: 'PRESELECTED',
+      }),
+      1,
+    )
+    assert.equal(
+      dashboardSectionRank({
+        conversationNeedsReply: false,
+        contactStatus: 'STALE_LOCAL_PROBE',
+        reviewStatus: 'NEEDS_DETAIL',
+      }),
+      2,
+    )
+    assert.equal(
+      dashboardSectionRank({
+        conversationNeedsReply: false,
+        contactStatus: 'READY_TO_CONTACT',
+        reviewStatus: 'PRESELECTED',
+      }),
+      3,
+    )
+  })
+
+  it('keeps MESSAGE_SENT terminal so workflow does not revert to READY', () => {
+    const contact = assignContact({
+      reviewStatus: 'PRESELECTED',
+      contactStatus: 'MESSAGE_SENT',
+      location: 'Cebu',
+      country: 'PH',
+      lastActivityAt: '2026-09-16T12:00:00.000Z',
+      faceVerified: 'YES',
+      now,
+    })
+    assert.equal(contact.contactStatus, 'MESSAGE_SENT')
+  })
+
+  it('does not put inbox-only rows on READY or PROBE queues', () => {
+    const contact = assignContact({
+      reviewStatus: 'UNREVIEWED',
+      contactStatus: 'NONE',
+      location: 'Mexico City',
+      country: 'Mexico',
+      lastActivityAt: '2025-01-01T00:00:00.000Z',
+      faceVerified: 'YES',
+      now,
+      inboxOnly: true,
+    })
+    assert.equal(contact.contactStatus, 'NONE')
+    assert.notEqual(contact.contactStatus, 'READY_TO_CONTACT')
+    assert.notEqual(contact.contactStatus, 'STALE_LOCAL_PROBE')
   })
 })
 

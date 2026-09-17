@@ -83,6 +83,8 @@ describe('api + store', () => {
     assert.equal(isForbiddenApiPath('/pinalove/api/playlikeuser'), true)
     assert.equal(isForbiddenApiPath('/pinalove/api/hideuser'), true)
     assert.equal(isForbiddenApiPath('/pinalove/api/blockuser'), true)
+    assert.equal(isForbiddenApiPath('/pinalove/api/mailboxnew'), true)
+    assert.equal(isForbiddenApiPath('/pinalove/api/markasread'), true)
     assert.equal(isForbiddenApiPath('/pinalove/api/profiles'), false)
   })
 
@@ -424,12 +426,12 @@ describe('api + store', () => {
       body: JSON.stringify({ action: 'mark-sent' }),
     })
     const sent = await sentRes.json()
-    assert.equal(sent.contactStatus, 'PROBE_SENT')
+    assert.equal(sent.contactStatus, 'MESSAGE_SENT')
     assert.ok(sent.manuallySentAt)
     app.store.applyLocalWorkflow(Date.parse('2026-09-16T20:00:00.000Z'))
     const afterSent = app.store.getById(row.id)
     assert.equal(afterSent?.draftMessage, original)
-    assert.equal(afterSent?.contactStatus, 'PROBE_SENT')
+    assert.equal(afterSent?.contactStatus, 'MESSAGE_SENT')
 
     await fetch(`${base}/pinalove/api/profiles/${row.id}/contact`, {
       method: 'PATCH',
@@ -643,8 +645,113 @@ describe('api + store', () => {
     assert.match(confirm, /Discard this profile from your review queue\?/)
     assert.match(confirm, /already marked as sent/)
     assert.match(confirm, /recorded reply/)
-    const store = readFileSync(join(process.cwd(), 'backend/src/store.ts'), 'utf8')
-    assert.match(store, /discardManual/)
-    assert.equal(/pinalove\.com\/nt|sendmessage|hideuser|blockuser/i.test(store), false)
+    const ui = readFileSync(join(process.cwd(), 'frontend/src/ActionRequiredList.tsx'), 'utf8')
+    assert.match(ui, /REPLIES \/ INBOX/)
+    assert.match(ui, /Women who wrote to you/)
+    assert.match(ui, /Open conversation/)
+    assert.match(ui, /Mark replied/)
+    assert.match(ui, /Ignore \/ Archive/)
+    assert.equal(/sendmessage|mailboxnew|convonew|markasread/i.test(ui), false)
+    assert.equal(/\bSend\b/.test(ui), false)
+  })
+
+  it('merges mailbox inbox by username without inventing externalId or reclassifying', async () => {
+    await listen()
+    const before = app.store.list({})
+    const ana = before.find((p) => p.username === 'demo_ana')
+    assert.ok(ana)
+    const anaStatus = ana.reviewStatus
+    const anaContact = ana.contactStatus
+    const anaExternal = ana.externalId
+    const result = app.store.ingestMailbox([
+      {
+        username: 'demo_ana',
+        mailid: 'mail-ana-1',
+        sender: 1,
+        text: 'Hi, are you still in CDMX?',
+        time: 1758086400,
+        lastactivity: 1758086400,
+        unread: true,
+        age: 99,
+        city: 'ShouldNotOverwrite',
+        gender: 'female',
+        faceVerified: 'YES',
+        primaryPhotoUrl: 'https://www.pinalove.com/p/x.jpg',
+        replied: 0,
+        premium: 0,
+      },
+      {
+        username: 'BrandNewInbox',
+        mailid: 'mail-new-1',
+        sender: 1,
+        text: 'hello good morning',
+        time: 1758086500,
+        lastactivity: 1758086500,
+        unread: true,
+        age: 28,
+        city: 'Cebu',
+        gender: 'female',
+        faceVerified: 'UNKNOWN',
+        primaryPhotoUrl: 'https://www.pinalove.com/p/n.jpg',
+        replied: 0,
+        premium: 0,
+      },
+    ])
+    assert.equal(result.messages, 2)
+    assert.equal(result.merged, 1)
+    assert.equal(result.inserted, 1)
+    const after = app.store.list({})
+    const anaAfter = after.find((p) => p.username === 'demo_ana')
+    assert.ok(anaAfter)
+    assert.equal(anaAfter.id, ana.id)
+    assert.equal(anaAfter.externalId, anaExternal)
+    assert.equal(anaAfter.reviewStatus, anaStatus)
+    assert.equal(anaAfter.contactStatus, anaContact)
+    assert.equal(anaAfter.age, ana.age)
+    assert.equal(anaAfter.location, ana.location)
+    assert.equal(anaAfter.conversationNeedsReply, true)
+    assert.equal(anaAfter.inboundUnread, true)
+    assert.match(anaAfter.lastInboundPreview ?? '', /CDMX/)
+    const fresh = after.find((p) => p.username === 'BrandNewInbox')
+    assert.ok(fresh)
+    assert.equal(fresh.externalId, null)
+    assert.equal(fresh.inboxIdentity, 'BrandNewInbox')
+    assert.equal(fresh.inboxMailId, 'mail-new-1')
+    assert.equal(fresh.source, 'PINALOVE_INBOX')
+    assert.equal(fresh.reviewStatus, 'UNREVIEWED')
+    assert.equal(fresh.contactStatus, 'NONE')
+    assert.equal(fresh.conversationNeedsReply, true)
+    app.store.applyLocalWorkflow(Date.parse('2026-09-17T04:00:00.000Z'))
+    assert.equal(app.store.getById(fresh.id)?.contactStatus, 'NONE')
+    assert.equal(app.store.getById(anaAfter.id)?.reviewStatus, anaStatus)
+    const archived = await fetch(`${(await listen())}/pinalove/api/profiles/${fresh.id}/contact`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'archive' }),
+    })
+    const archivedJson = await archived.json()
+    assert.equal(archived.status, 200)
+    assert.equal(archivedJson.conversationNeedsReply, false)
+    const again = app.store.ingestMailbox([
+      {
+        username: 'BrandNewInbox',
+        mailid: 'mail-new-1',
+        sender: 1,
+        text: 'hello again',
+        time: 1758086600,
+        lastactivity: 1758086600,
+        unread: true,
+        age: 28,
+        city: 'Cebu',
+        gender: 'female',
+        faceVerified: 'UNKNOWN',
+        primaryPhotoUrl: 'https://www.pinalove.com/p/n.jpg',
+        replied: 0,
+        premium: 0,
+      },
+    ])
+    assert.equal(again.inserted, 0)
+    assert.equal(again.merged, 1)
+    assert.equal(app.store.list({}).filter((p) => p.username === 'BrandNewInbox').length, 1)
   })
 })

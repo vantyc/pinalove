@@ -18,12 +18,13 @@ import { assertNoSecretsInFacts, listsNewMatchToImport } from './toImport.ts'
 import { stripSensitiveFields } from './sanitize.ts'
 
 describe('reader allowlist', () => {
-  it('allows listsnew, profilenew, and browsenew', () => {
-    assert.deepEqual([...ALLOWED_READ_ACTIONS], ['listsnew', 'profilenew', 'browsenew'])
+  it('allows listsnew, profilenew, browsenew, and mailboxnew', () => {
+    assert.deepEqual([...ALLOWED_READ_ACTIONS], ['listsnew', 'profilenew', 'browsenew', 'mailboxnew'])
     assert.equal(isAllowedReadAction('listsnew'), true)
     assert.equal(isAllowedReadAction('profilenew'), true)
     assert.equal(isAllowedReadAction('browsenew'), true)
-    assert.equal(ALLOWED_READ_ACTIONS.length, 3)
+    assert.equal(isAllowedReadAction('mailboxnew'), true)
+    assert.equal(ALLOWED_READ_ACTIONS.length, 4)
   })
 
   it('rejects known mutators and any other action', () => {
@@ -31,7 +32,7 @@ describe('reader allowlist', () => {
       assert.equal(isAllowedReadAction(action), false)
       assert.throws(() => assertAllowedReadAction(action))
     }
-    for (const action of ['sendmessage', 'playlikeuser', 'revealvisit', 'editmyprofilenew', 'feedprofileview']) {
+    for (const action of ['sendmessage', 'playlikeuser', 'revealvisit', 'editmyprofilenew', 'feedprofileview', 'markasread', 'broadcastinchat']) {
       assert.equal(isAllowedReadAction(action), false)
       assert.throws(() => assertAllowedReadAction(action))
     }
