@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { openDatabase } from './db.ts'
 import { ProfileStore } from './store.ts'
-import { normalizeMailboxItem, type MailboxIngestPayload } from '../../shared/inbox.ts'
+import { type MailboxIngestPayload } from '../../shared/inbox.ts'
 
 const sqlitePath = process.env.SQLITE_PATH ?? path.join(process.cwd(), 'data/pinalove.sqlite')
 const file = process.argv[2]
