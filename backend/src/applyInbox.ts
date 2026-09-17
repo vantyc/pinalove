@@ -22,11 +22,14 @@ const before = store.count()
 const result = store.ingestMailbox(items)
 const after = store.list({})
 const needs = after.filter((p) => p.conversationNeedsReply)
+const pending = after.filter((p) => p.inboundReviewStatus === 'PENDING')
 const report = {
   sqlitePath,
   rowsBefore: before,
   rowsAfter: after.length,
   ...result,
+  pendingInbound: pending.length,
+  pendingUsernames: pending.map((p) => p.username),
   conversationNeedsReply: needs.length,
   replyUsernames: needs.map((p) => p.username),
 }

@@ -5,15 +5,19 @@ import { classifyListsNewMatch } from '../../shared/classify.ts'
 import { evaluationFromImport, evaluateProfile } from '../../shared/scoring.ts'
 import { interpretDistance } from '../../shared/geo.ts'
 import { activityCategory } from '../../shared/activity.ts'
-import { assignContact, generateStaleProbeDraft } from '../../shared/workflow.ts'
+import { assignContact, conversationNeedsReply as workflowNeedsReply, generateStaleProbeDraft } from '../../shared/workflow.ts'
 import { generateOpeningDraft } from '../../shared/drafts.ts'
 import {
+  hasPriorOutboundContact,
   inboxIdentityFromUsername,
   inboundAtFromMailbox,
+  inboundReviewOnIngest,
   mailboxNeedsReply,
   mailboxProfileUrl,
+  queueConversationNeedsReply,
   type MailboxNewItem,
 } from '../../shared/inbox.ts'
+import { migrateInboundReview } from './db.ts'
 import type {
   ActivityCategory,
   ContactStatus,
@@ -107,6 +111,7 @@ type ProfileRow = {
   conversation_needs_reply: number | null
   inbox_identity: string | null
   inbox_mail_id: string | null
+  inbound_review_status: string | null
   created_at: string
   updated_at: string
 }
@@ -209,6 +214,12 @@ function rowToProfile(row: ProfileRow): Profile {
     inboundUnread: Boolean(row.inbound_unread),
     lastInboundPreview: row.last_inbound_preview ?? null,
     conversationNeedsReply: Boolean(row.conversation_needs_reply),
+    inboundReviewStatus:
+      row.inbound_review_status === 'PENDING' ||
+      row.inbound_review_status === 'INTERESTED' ||
+      row.inbound_review_status === 'DISCARDED'
+        ? row.inbound_review_status
+        : null,
     inboxIdentity: row.inbox_identity ?? null,
     inboxMailId: row.inbox_mail_id ?? null,
     logisticPriority: row.logistic_priority === 'LOCAL' ? 'HIGH_LOCAL' : (row.logistic_priority ?? 'NONE'),
@@ -364,7 +375,12 @@ export class ProfileStore {
       probeSent: profiles.filter((p) => p.contactStatus === 'PROBE_SENT').length,
       messageSent: profiles.filter((p) => p.contactStatus === 'MESSAGE_SENT').length,
       needsReply: profiles.filter((p) => p.conversationNeedsReply).length,
+      pendingInbound: profiles.filter(
+        (p) => p.inboundReviewStatus === 'PENDING' && (p.lastInboundAt != null || p.inboundUnread),
+      ).length,
+      interestedInbound: profiles.filter((p) => p.inboundReviewStatus === 'INTERESTED').length,
       actionRequired: profiles.filter((p) => {
+        if (p.inboundReviewStatus === 'PENDING' && (p.lastInboundAt != null || p.inboundUnread)) return true
         if (p.conversationNeedsReply) return true
         if (p.reviewStatus === 'DISCARDED') return false
         if (p.contactStatus === 'STALE_LOCAL_PROBE') return true
@@ -438,10 +454,11 @@ export class ProfileStore {
       .prepare(
         `UPDATE profiles SET
           review_status = ?, contact_status = ?, decision_reason = ?,
+          inbound_review_status = ?, conversation_needs_reply = 0,
           last_human_action_at = ?, updated_at = ?
          WHERE id = ?`,
       )
-      .run('DISCARDED', 'NONE', reason, ts, ts, id)
+      .run('DISCARDED', 'NONE', reason, 'DISCARDED', ts, ts, id)
     this.appendLog(id, current.reviewStatus, 'DISCARDED', reason, 'USER', ts)
     return this.getById(id)
   }
@@ -496,12 +513,28 @@ export class ProfileStore {
       })
       draftAt = ts
     }
+    let inboundReview = current.inboundReviewStatus === 'DISCARDED' ? null : current.inboundReviewStatus
+    if (current.inboundReviewStatus === 'DISCARDED' && (current.lastInboundAt || current.inboundUnread)) {
+      inboundReview = hasPriorOutboundContact(contactStatus) ? 'INTERESTED' : 'PENDING'
+    }
+    const inboundPending =
+      Boolean(current.inboundUnread) ||
+      workflowNeedsReply({
+        lastInboundAt: current.lastInboundAt,
+        lastOutboundAt: current.lastOutboundAt ?? current.manuallySentAt,
+      })
+    const needsReply = queueConversationNeedsReply({
+      inboundPending,
+      inboundReviewStatus: inboundReview,
+      contactStatus,
+    })
     this.db
       .prepare(
         `UPDATE profiles SET
           review_status = ?, classification_reasons = ?, missing_detail = ?,
           contact_status = ?, draft_message = ?, draft_created_at = ?, proposed_message = ?,
           logistic_priority = ?, priority_reasons = ?, uncertainty_reasons = ?,
+          inbound_review_status = ?, conversation_needs_reply = ?,
           last_human_action_at = ?, updated_at = ?
          WHERE id = ?`,
       )
@@ -516,6 +549,8 @@ export class ProfileStore {
         assigned.logisticPriority,
         JSON.stringify(assigned.priorityReasons),
         JSON.stringify(assigned.uncertaintyReasons),
+        inboundReview,
+        needsReply ? 1 : 0,
         ts,
         ts,
         id,
@@ -701,6 +736,45 @@ export class ProfileStore {
     return this.getById(id)
   }
 
+  /** Human inbound interest. SQLite only. Does not call PinaLove, mark as read, or send. */
+  markInboundInterested(id: string): Profile | null {
+    const current = this.getById(id)
+    if (!current) return null
+    const ts = nowIso()
+    const inboundPending =
+      Boolean(current.inboundUnread) ||
+      workflowNeedsReply({
+        lastInboundAt: current.lastInboundAt,
+        lastOutboundAt: current.lastOutboundAt ?? current.manuallySentAt,
+      })
+    const needsReply = queueConversationNeedsReply({
+      inboundPending,
+      inboundReviewStatus: 'INTERESTED',
+      contactStatus: current.contactStatus,
+    })
+    this.db
+      .prepare(
+        `UPDATE profiles SET
+          inbound_review_status = ?, conversation_needs_reply = ?,
+          last_human_action_at = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run('INTERESTED', needsReply ? 1 : 0, ts, ts, id)
+    this.appendLog(
+      id,
+      current.reviewStatus,
+      current.reviewStatus,
+      'inbound INTERESTED (manual, local only)',
+      'USER',
+      ts,
+    )
+    return this.getById(id)
+  }
+
+  applyInboundReviewMigration(): void {
+    migrateInboundReview(this.db)
+  }
+
   ingestMailbox(items: MailboxNewItem[], now = Date.now()): {
     messages: number
     merged: number
@@ -730,7 +804,13 @@ export class ProfileStore {
         const inboundAt = inboundAtFromMailbox(item)
         const existing = this.findByUsername(username)
         const lastOutbound = existing?.lastOutboundAt ?? existing?.manuallySentAt ?? null
-        const needsReply = mailboxNeedsReply(item, lastOutbound)
+        const inboundPending = mailboxNeedsReply(item, lastOutbound)
+        const inboundReview = inboundReviewOnIngest(existing)
+        const needsReply = queueConversationNeedsReply({
+          inboundPending,
+          inboundReviewStatus: inboundReview,
+          contactStatus: existing?.contactStatus ?? 'NONE',
+        })
         if (needsReply) result.needsReply += 1
         result.senders.push(username)
         if (existing) {
@@ -739,7 +819,8 @@ export class ProfileStore {
             .prepare(
               `UPDATE profiles SET
                 last_inbound_at = ?, inbound_unread = ?, last_inbound_preview = ?,
-                conversation_needs_reply = ?, inbox_identity = COALESCE(inbox_identity, ?),
+                conversation_needs_reply = ?, inbound_review_status = ?,
+                inbox_identity = COALESCE(inbox_identity, ?),
                 inbox_mail_id = ?, last_seen_at = ?, sources = ?,
                 primary_photo_url = COALESCE(primary_photo_url, ?),
                 updated_at = ?
@@ -750,6 +831,7 @@ export class ProfileStore {
               item.unread ? 1 : 0,
               item.text,
               needsReply ? 1 : 0,
+              inboundReview,
               identity,
               item.mailid,
               ts,
@@ -774,7 +856,7 @@ export class ProfileStore {
               gender, face_verified, field_facts, classification_reasons, missing_detail,
               facts, text_signals, data_conflicts, contact_status,
               last_inbound_at, inbound_unread, last_inbound_preview, conversation_needs_reply,
-              inbox_identity, inbox_mail_id, created_at, updated_at
+              inbound_review_status, inbox_identity, inbox_mail_id, created_at, updated_at
             ) VALUES (
               ?, NULL, ?, ?, ?,
               ?, ?, NULL,
@@ -784,8 +866,8 @@ export class ProfileStore {
               'UNREVIEWED', 'NONE', '[]', '[]',
               ?, 'UNKNOWN', '{}', '[]', '[]',
               '[]', '[]', '[]', 'NONE',
-              ?, ?, ?, ?,
-              ?, ?, ?, ?
+              ?, ?, ?, 0,
+              'PENDING', ?, ?, ?, ?
             )`,
           )
           .run(
@@ -803,7 +885,6 @@ export class ProfileStore {
             inboundAt,
             item.unread ? 1 : 0,
             item.text,
-            needsReply ? 1 : 0,
             identity,
             item.mailid,
             ts,
@@ -1053,6 +1134,7 @@ export class ProfileStore {
       inboundUnread: existing?.inboundUnread ?? false,
       lastInboundPreview: existing?.lastInboundPreview ?? null,
       conversationNeedsReply: existing?.conversationNeedsReply ?? false,
+      inboundReviewStatus: existing?.inboundReviewStatus ?? null,
       inboxIdentity: existing?.inboxIdentity ?? null,
       inboxMailId: existing?.inboxMailId ?? null,
       logisticPriority: existing?.logisticPriority ?? 'NONE',

@@ -292,14 +292,25 @@ describe('inbox conversationNeedsReply', () => {
     assert.equal(conversationNeedsReply({ lastInboundAt: '2026-09-16T18:00:00.000Z', lastOutboundAt: null }), true)
   })
 
-  it('ranks replies above probes and ready', () => {
+  it('ranks new inbound review above replies, probes and ready', () => {
+    assert.equal(
+      dashboardSectionRank({
+        inboundReviewStatus: 'PENDING',
+        lastInboundAt: '2026-09-16T18:00:00.000Z',
+        inboundUnread: true,
+        conversationNeedsReply: false,
+        contactStatus: 'NONE',
+        reviewStatus: 'UNREVIEWED',
+      }),
+      1,
+    )
     assert.equal(
       dashboardSectionRank({
         conversationNeedsReply: true,
         contactStatus: 'READY_TO_CONTACT',
         reviewStatus: 'PRESELECTED',
       }),
-      1,
+      2,
     )
     assert.equal(
       dashboardSectionRank({
@@ -307,7 +318,7 @@ describe('inbox conversationNeedsReply', () => {
         contactStatus: 'STALE_LOCAL_PROBE',
         reviewStatus: 'NEEDS_DETAIL',
       }),
-      2,
+      3,
     )
     assert.equal(
       dashboardSectionRank({
@@ -315,7 +326,7 @@ describe('inbox conversationNeedsReply', () => {
         contactStatus: 'READY_TO_CONTACT',
         reviewStatus: 'PRESELECTED',
       }),
-      3,
+      4,
     )
   })
 

@@ -24,6 +24,10 @@ export const CONTACT_STATUSES = [
 ] as const
 export type ContactStatus = (typeof CONTACT_STATUSES)[number]
 
+/** Human decision on an inbound sender. Independent from unread and from contactStatus. */
+export const INBOUND_REVIEW_STATUSES = ['PENDING', 'INTERESTED', 'DISCARDED'] as const
+export type InboundReviewStatus = (typeof INBOUND_REVIEW_STATUSES)[number]
+
 export const DISTANCE_TRUSTS = ['TRUSTED', 'UNTRUSTED', 'UNKNOWN'] as const
 export type DistanceTrust = (typeof DISTANCE_TRUSTS)[number]
 
@@ -231,6 +235,7 @@ export type Profile = {
   inboundUnread: boolean
   lastInboundPreview: string | null
   conversationNeedsReply: boolean
+  inboundReviewStatus: InboundReviewStatus | null
   inboxIdentity: string | null
   inboxMailId: string | null
   logisticPriority: LogisticPriority
@@ -311,6 +316,8 @@ export type DashboardStats = {
   probeSent: number
   messageSent: number
   needsReply: number
+  pendingInbound: number
+  interestedInbound: number
   actionRequired: number
 }
 

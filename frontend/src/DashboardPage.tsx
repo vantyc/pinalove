@@ -21,16 +21,31 @@ export function DashboardPage() {
     void load()
   }, [])
 
-  const replies = all
-    .filter((p) => p.conversationNeedsReply)
+  const pendingInbound = all
+    .filter(
+      (p) =>
+        p.inboundReviewStatus === 'PENDING' &&
+        (p.lastInboundAt != null || p.inboundUnread) &&
+        p.reviewStatus !== 'DISCARDED',
+    )
     .sort((a, b) => {
       const ta = Date.parse(a.lastInboundAt ?? '') || 0
       const tb = Date.parse(b.lastInboundAt ?? '') || 0
       return tb - ta
     })
-  const stale = all.filter((p) => p.contactStatus === 'STALE_LOCAL_PROBE' && !p.conversationNeedsReply)
+  const pendingIds = new Set(pendingInbound.map((p) => p.id))
+  const replies = all
+    .filter((p) => p.conversationNeedsReply && !pendingIds.has(p.id))
+    .sort((a, b) => {
+      const ta = Date.parse(a.lastInboundAt ?? '') || 0
+      const tb = Date.parse(b.lastInboundAt ?? '') || 0
+      return tb - ta
+    })
+  const stale = all.filter(
+    (p) => p.contactStatus === 'STALE_LOCAL_PROBE' && !p.conversationNeedsReply && !pendingIds.has(p.id),
+  )
   const ready = all
-    .filter((p) => p.contactStatus === 'READY_TO_CONTACT' && !p.conversationNeedsReply)
+    .filter((p) => p.contactStatus === 'READY_TO_CONTACT' && !p.conversationNeedsReply && !pendingIds.has(p.id))
     .sort((a, b) => {
       const ra = messageQueueRank(a) ?? 9
       const rb = messageQueueRank(b) ?? 9
@@ -41,6 +56,7 @@ export function DashboardPage() {
     (p) =>
       p.reviewStatus === 'PRESELECTED' &&
       !p.conversationNeedsReply &&
+      !pendingIds.has(p.id) &&
       p.contactStatus !== 'READY_TO_CONTACT' &&
       p.contactStatus !== 'PROBE_SENT' &&
       p.contactStatus !== 'MESSAGE_SENT' &&
@@ -50,6 +66,7 @@ export function DashboardPage() {
     (p) =>
       p.reviewStatus === 'NEEDS_DETAIL' &&
       !p.conversationNeedsReply &&
+      !pendingIds.has(p.id) &&
       p.contactStatus !== 'STALE_LOCAL_PROBE' &&
       p.contactStatus !== 'READY_TO_CONTACT',
   )
@@ -61,6 +78,10 @@ export function DashboardPage() {
         <div className="stat">
           <strong>{stats?.actionRequired ?? '—'}</strong>
           <span>Action required</span>
+        </div>
+        <div className="stat">
+          <strong>{stats?.pendingInbound ?? '—'}</strong>
+          <span>New inbound</span>
         </div>
         <div className="stat">
           <strong>{stats?.needsReply ?? '—'}</strong>
@@ -95,6 +116,7 @@ export function DashboardPage() {
         </p>
       ) : null}
       <ActionRequiredList
+        pendingInbound={pendingInbound}
         replies={replies}
         ready={ready}
         stale={stale}

@@ -307,6 +307,15 @@ async function handleApi(
         sendJson(res, 200, profile)
         return
       }
+      if (parsed.data.action === 'interested') {
+        const profile = store.markInboundInterested(id)
+        if (!profile) {
+          sendJson(res, 404, { error: 'profile not found' })
+          return
+        }
+        sendJson(res, 200, profile)
+        return
+      }
       if (parsed.data.action === 'replied' || parsed.data.action === 'no-response') {
         const profile = store.markContactOutcome(
           id,

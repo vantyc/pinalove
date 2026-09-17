@@ -646,12 +646,16 @@ describe('api + store', () => {
     assert.match(confirm, /already marked as sent/)
     assert.match(confirm, /recorded reply/)
     const ui = readFileSync(join(process.cwd(), 'frontend/src/ActionRequiredList.tsx'), 'utf8')
+    assert.match(ui, /NEW INBOUND — REVIEW FIRST/)
+    assert.match(ui, /INTERESTED/)
+    assert.match(ui, /DISCARD/)
+    assert.match(ui, /OPEN PROFILE/)
     assert.match(ui, /REPLIES \/ INBOX/)
     assert.match(ui, /Women who wrote to you/)
     assert.match(ui, /Open conversation/)
     assert.match(ui, /Mark replied/)
     assert.match(ui, /Ignore \/ Archive/)
-    assert.equal(/sendmessage|mailboxnew|convonew|markasread/i.test(ui), false)
+    assert.equal(/sendmessage|mailboxnew|convonew|markasread|hideuser|blockuser|playhideuser/i.test(ui), false)
     assert.equal(/\bSend\b/.test(ui), false)
   })
 
@@ -709,8 +713,9 @@ describe('api + store', () => {
     assert.equal(anaAfter.contactStatus, anaContact)
     assert.equal(anaAfter.age, ana.age)
     assert.equal(anaAfter.location, ana.location)
-    assert.equal(anaAfter.conversationNeedsReply, true)
     assert.equal(anaAfter.inboundUnread, true)
+    assert.equal(anaAfter.inboundReviewStatus, 'PENDING')
+    assert.equal(anaAfter.conversationNeedsReply, false)
     assert.match(anaAfter.lastInboundPreview ?? '', /CDMX/)
     const fresh = after.find((p) => p.username === 'BrandNewInbox')
     assert.ok(fresh)
@@ -720,7 +725,10 @@ describe('api + store', () => {
     assert.equal(fresh.source, 'PINALOVE_INBOX')
     assert.equal(fresh.reviewStatus, 'UNREVIEWED')
     assert.equal(fresh.contactStatus, 'NONE')
-    assert.equal(fresh.conversationNeedsReply, true)
+    assert.equal(fresh.inboundReviewStatus, 'PENDING')
+    assert.equal(fresh.conversationNeedsReply, false)
+    assert.equal(fresh.inboundUnread, true)
+    assert.equal(result.needsReply, 0)
     app.store.applyLocalWorkflow(Date.parse('2026-09-17T04:00:00.000Z'))
     assert.equal(app.store.getById(fresh.id)?.contactStatus, 'NONE')
     assert.equal(app.store.getById(anaAfter.id)?.reviewStatus, anaStatus)
@@ -753,5 +761,139 @@ describe('api + store', () => {
     assert.equal(again.inserted, 0)
     assert.equal(again.merged, 1)
     assert.equal(app.store.list({}).filter((p) => p.username === 'BrandNewInbox').length, 1)
+  })
+
+  it('inbound review: PENDING first, INTERESTED to REPLIES, DISCARD local only', async () => {
+    const base = await listen()
+    const mailbox = (username: string, text: string) => ({
+      username,
+      mailid: `mail-${username}`,
+      sender: 1,
+      text,
+      time: 1758087000,
+      lastactivity: 1758087000,
+      unread: true,
+      age: 41,
+      city: 'Cebu City',
+      gender: 'female',
+      faceVerified: 'UNKNOWN' as const,
+      primaryPhotoUrl: `https://www.pinalove.com/p/${username}.jpg`,
+      replied: 0,
+      premium: 0,
+    })
+
+    const unknown = app.store.ingestMailbox([mailbox('UnknownInbound', 'hi from cebu')])
+    assert.equal(unknown.inserted, 1)
+    assert.equal(unknown.needsReply, 0)
+    const pending = app.store.list({}).find((p) => p.username === 'UnknownInbound')
+    assert.ok(pending)
+    assert.equal(pending.inboundReviewStatus, 'PENDING')
+    assert.equal(pending.inboundUnread, true)
+    assert.equal(pending.conversationNeedsReply, false)
+    const statsPending = app.store.stats()
+    assert.ok(statsPending.pendingInbound >= 1)
+    assert.equal(
+      statsPending.needsReply,
+      app.store.list({}).filter((p) => p.conversationNeedsReply).length,
+    )
+
+    const interestedRes = await fetch(`${base}/pinalove/api/profiles/${pending.id}/contact`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'interested' }),
+    })
+    const interestedJson = await interestedRes.json()
+    assert.equal(interestedRes.status, 200)
+    assert.equal(interestedJson.inboundReviewStatus, 'INTERESTED')
+    assert.equal(interestedJson.conversationNeedsReply, true)
+    assert.equal(interestedJson.inboundUnread, true)
+    assert.equal(interestedJson.lastInboundPreview, 'hi from cebu')
+    const statsInterested = app.store.stats()
+    assert.ok(statsInterested.interestedInbound >= 1)
+    assert.ok(statsInterested.needsReply >= 1)
+
+    const toDiscard = app.store.ingestMailbox([mailbox('DiscardInbound', 'hello good morning')])
+    assert.equal(toDiscard.inserted, 1)
+    const discardRow = app.store.list({}).find((p) => p.username === 'DiscardInbound')
+    assert.ok(discardRow)
+    const discardedRes = await fetch(`${base}/pinalove/api/profiles/${discardRow.id}/contact`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'discard' }),
+    })
+    const discardedJson = await discardedRes.json()
+    assert.equal(discardedRes.status, 200)
+    assert.equal(discardedJson.inboundReviewStatus, 'DISCARDED')
+    assert.equal(discardedJson.reviewStatus, 'DISCARDED')
+    assert.equal(discardedJson.conversationNeedsReply, false)
+    assert.equal(discardedJson.lastInboundPreview, 'hello good morning')
+    assert.equal(discardedJson.inboundUnread, true)
+
+    const imported = await fetch(`${base}/pinalove/api/profiles/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        profiles: [
+          {
+            externalId: 'known-sent-1',
+            username: 'KnownSentInbox',
+            profileUrl: 'https://www.pinalove.com/KnownSentInbox',
+            source: 'PINALOVE',
+            age: 36,
+            location: 'Cebu',
+            reviewStatus: 'PRESELECTED',
+          },
+        ],
+      }),
+    })
+    assert.equal((await imported.json()).imported, 1)
+    const known = app.store.list({}).find((p) => p.username === 'KnownSentInbox')
+    assert.ok(known)
+    const sent = await fetch(`${base}/pinalove/api/profiles/${known.id}/contact`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'mark-sent' }),
+    })
+    assert.equal((await sent.json()).contactStatus, 'MESSAGE_SENT')
+    const knownIngest = app.store.ingestMailbox([mailbox('KnownSentInbox', 'thanks for writing')])
+    assert.equal(knownIngest.merged, 1)
+    assert.equal(knownIngest.needsReply, 1)
+    const knownAfter = app.store.getById(known.id)
+    assert.ok(knownAfter)
+    assert.equal(knownAfter.inboundReviewStatus, 'INTERESTED')
+    assert.equal(knownAfter.conversationNeedsReply, true)
+    assert.equal(knownAfter.inboundUnread, true)
+
+    const juliaEmma = app.store.ingestMailbox([
+      mailbox('Julia9346', 'hi'),
+      mailbox('Emma7093', 'Hello good morning'),
+    ])
+    assert.equal(juliaEmma.inserted, 2)
+    const db = (app.store as unknown as { db: { prepare: (sql: string) => { run: (...a: unknown[]) => void } } }).db
+    db.prepare(
+      `UPDATE profiles SET inbound_review_status = NULL, conversation_needs_reply = 1
+       WHERE username IN (?, ?)`,
+    ).run('Julia9346', 'Emma7093')
+    app.store.applyInboundReviewMigration()
+    app.store.applyInboundReviewMigration()
+    for (const name of ['Julia9346', 'Emma7093']) {
+      const row = app.store.list({}).find((p) => p.username === name)
+      assert.ok(row)
+      assert.equal(row.inboundReviewStatus, 'PENDING')
+      assert.equal(row.conversationNeedsReply, false)
+      assert.ok(row.lastInboundPreview)
+    }
+
+    assert.equal(isForbiddenApiPath('/pinalove/api/profiles/x/contact'), false)
+    assert.equal(isForbiddenApiPath('/pinalove/api/sendmessage'), true)
+    assert.equal(isForbiddenApiPath('/pinalove/api/mailboxnew'), true)
+    assert.equal(isForbiddenApiPath('/pinalove/api/convonew'), true)
+    assert.equal(isForbiddenApiPath('/pinalove/api/markasread'), true)
+    const { readFileSync } = await import('node:fs')
+    const storeSrc = readFileSync(new URL('./store.ts', import.meta.url), 'utf8')
+    assert.match(storeSrc, /markInboundInterested/)
+    assert.equal(/apiRequest|sendmessage|mailboxnew|convonew|markasread|hideuser|blockuser/.test(storeSrc), false)
+    const ui = readFileSync(path.join(process.cwd(), 'frontend/src/ActionRequiredList.tsx'), 'utf8')
+    assert.equal(/sendmessage|mailboxnew|convonew|markasread|hideuser|blockuser/.test(ui), false)
   })
 })

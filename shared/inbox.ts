@@ -1,6 +1,6 @@
-import { conversationNeedsReply } from './workflow.ts'
 import { lastActivityToIso } from './activity.ts'
-import type { Tristate } from './types.ts'
+import type { ContactStatus, InboundReviewStatus, Tristate } from './types.ts'
+import { conversationNeedsReply } from './workflow.ts'
 
 export const PINALOVE_ORIGIN = 'https://www.pinalove.com'
 
@@ -118,4 +118,31 @@ export function mailboxNeedsReply(item: MailboxNewItem, lastOutboundAt: string |
   const inbound = inboundAtFromMailbox(item)
   if (item.unread) return true
   return conversationNeedsReply({ lastInboundAt: inbound, lastOutboundAt })
+}
+
+export function hasPriorOutboundContact(contactStatus: ContactStatus | null | undefined): boolean {
+  return contactStatus === 'PROBE_SENT' || contactStatus === 'MESSAGE_SENT' || contactStatus === 'REPLIED'
+}
+
+export function inboundReviewOnIngest(existing: {
+  inboundReviewStatus?: InboundReviewStatus | null
+  contactStatus?: ContactStatus | null
+} | null): InboundReviewStatus {
+  if (existing?.inboundReviewStatus === 'DISCARDED') return 'DISCARDED'
+  if (existing?.inboundReviewStatus === 'INTERESTED') return 'INTERESTED'
+  if (existing && hasPriorOutboundContact(existing.contactStatus)) return 'INTERESTED'
+  return 'PENDING'
+}
+
+/** Queue for REPLIES only after a human wants to continue, or prior outbound contact. */
+export function queueConversationNeedsReply(input: {
+  inboundPending: boolean
+  inboundReviewStatus: InboundReviewStatus | null
+  contactStatus?: ContactStatus | null
+}): boolean {
+  if (!input.inboundPending) return false
+  if (input.inboundReviewStatus === 'DISCARDED') return false
+  if (input.inboundReviewStatus === 'PENDING') return false
+  if (input.inboundReviewStatus === 'INTERESTED') return true
+  return hasPriorOutboundContact(input.contactStatus)
 }

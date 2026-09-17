@@ -147,17 +147,21 @@ export function conversationNeedsReply(input: {
   return inbound > outbound
 }
 
-/** Dashboard order: replies, probes, ready, needs detail, discarded. */
+/** Dashboard order: new inbound review, replies, probes, ready, needs detail, discarded. */
 export function dashboardSectionRank(input: {
+  inboundReviewStatus?: string | null
+  lastInboundAt?: string | null
+  inboundUnread?: boolean
   conversationNeedsReply?: boolean
   contactStatus: ContactStatus
   reviewStatus: ReviewStatus
-}): 1 | 2 | 3 | 4 | 5 | null {
-  if (input.conversationNeedsReply) return 1
-  if (input.contactStatus === 'STALE_LOCAL_PROBE') return 2
-  if (input.contactStatus === 'READY_TO_CONTACT') return 3
-  if (input.reviewStatus === 'NEEDS_DETAIL') return 4
-  if (input.reviewStatus === 'DISCARDED') return 5
+}): 1 | 2 | 3 | 4 | 5 | 6 | null {
+  if (input.inboundReviewStatus === 'PENDING' && (input.lastInboundAt || input.inboundUnread)) return 1
+  if (input.conversationNeedsReply) return 2
+  if (input.contactStatus === 'STALE_LOCAL_PROBE') return 3
+  if (input.contactStatus === 'READY_TO_CONTACT') return 4
+  if (input.reviewStatus === 'NEEDS_DETAIL') return 5
+  if (input.reviewStatus === 'DISCARDED') return 6
   return null
 }
 

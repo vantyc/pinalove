@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  hasPriorOutboundContact,
   inboundAtFromMailbox,
+  inboundReviewOnIngest,
   mailboxProfileUrl,
   normalizeMailboxItem,
+  queueConversationNeedsReply,
 } from './inbox.ts'
 
 describe('mailboxnew normalize', () => {
@@ -32,5 +35,98 @@ describe('mailboxnew normalize', () => {
 
   it('drops rows without username', () => {
     assert.equal(normalizeMailboxItem({ mailid: 'x', text: 'hi' }), null)
+  })
+})
+
+describe('inbound review vs unread vs replies', () => {
+  it('unknown inbound stays PENDING and is not queued for REPLIES', () => {
+    assert.equal(inboundReviewOnIngest(null), 'PENDING')
+    assert.equal(
+      queueConversationNeedsReply({
+        inboundPending: true,
+        inboundReviewStatus: 'PENDING',
+        contactStatus: 'NONE',
+      }),
+      false,
+    )
+  })
+
+  it('PENDING + unread is not conversationNeedsReply', () => {
+    assert.equal(
+      queueConversationNeedsReply({
+        inboundPending: true,
+        inboundReviewStatus: 'PENDING',
+        contactStatus: 'NONE',
+      }),
+      false,
+    )
+  })
+
+  it('INTERESTED + inbound pending queues REPLIES', () => {
+    assert.equal(
+      queueConversationNeedsReply({
+        inboundPending: true,
+        inboundReviewStatus: 'INTERESTED',
+        contactStatus: 'NONE',
+      }),
+      true,
+    )
+  })
+
+  it('DISCARD never queues REPLIES', () => {
+    assert.equal(
+      queueConversationNeedsReply({
+        inboundPending: true,
+        inboundReviewStatus: 'DISCARDED',
+        contactStatus: 'MESSAGE_SENT',
+      }),
+      false,
+    )
+  })
+
+  it('known previously contacted inbound queues REPLIES', () => {
+    assert.equal(hasPriorOutboundContact('MESSAGE_SENT'), true)
+    assert.equal(hasPriorOutboundContact('PROBE_SENT'), true)
+    assert.equal(hasPriorOutboundContact('REPLIED'), true)
+    assert.equal(inboundReviewOnIngest({ contactStatus: 'MESSAGE_SENT' }), 'INTERESTED')
+    assert.equal(
+      queueConversationNeedsReply({
+        inboundPending: true,
+        inboundReviewStatus: inboundReviewOnIngest({ contactStatus: 'PROBE_SENT' }),
+        contactStatus: 'PROBE_SENT',
+      }),
+      true,
+    )
+  })
+
+  it('existing never approved or contacted inbound stays PENDING', () => {
+    assert.equal(inboundReviewOnIngest({ contactStatus: 'NONE', inboundReviewStatus: null }), 'PENDING')
+    assert.equal(inboundReviewOnIngest({ contactStatus: 'READY_TO_CONTACT' }), 'PENDING')
+    assert.equal(inboundReviewOnIngest({ contactStatus: 'STALE_LOCAL_PROBE' }), 'PENDING')
+    assert.equal(
+      queueConversationNeedsReply({
+        inboundPending: true,
+        inboundReviewStatus: 'PENDING',
+        contactStatus: 'READY_TO_CONTACT',
+      }),
+      false,
+    )
+  })
+
+  it('keeps inboundUnread conceptually separate from conversationNeedsReply', () => {
+    assert.equal(
+      queueConversationNeedsReply({
+        inboundPending: true,
+        inboundReviewStatus: 'PENDING',
+      }),
+      false,
+    )
+    assert.equal(
+      queueConversationNeedsReply({
+        inboundPending: false,
+        inboundReviewStatus: 'INTERESTED',
+      }),
+      false,
+    )
   })
 })
