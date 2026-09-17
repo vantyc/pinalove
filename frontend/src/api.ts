@@ -48,6 +48,10 @@ export function filtersToQuery(filters: ProfileFilters): string {
   return q.toString()
 }
 
+export function fetchSession() {
+  return parse<{ user: string | null }>(fetch(`${API}/session`))
+}
+
 export function fetchProfiles(filters: ProfileFilters = {}) {
   const qs = filtersToQuery(filters)
   return parse<{ profiles: Profile[]; total: number }>(
@@ -69,7 +73,10 @@ export function fetchStats() {
 
 export function patchContact(
   id: string,
-  body: { action: 'mark-sent' | 'notes' | 'replied' | 'no-response'; notes?: string | null },
+  body: {
+    action: 'mark-sent' | 'notes' | 'replied' | 'no-response' | 'discard' | 'restore'
+    notes?: string | null
+  },
 ) {
   return parse<Profile>(
     fetch(`${API}/profiles/${id}/contact`, {

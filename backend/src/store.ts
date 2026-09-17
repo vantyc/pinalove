@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { DEFAULT_RULE_CONFIG } from '../../shared/defaultRules.ts'
+import { classifyListsNewMatch } from '../../shared/classify.ts'
 import { evaluationFromImport, evaluateProfile } from '../../shared/scoring.ts'
 import { interpretDistance } from '../../shared/geo.ts'
 import { activityCategory } from '../../shared/activity.ts'
@@ -383,6 +384,7 @@ export class ProfileStore {
     reason: string | null,
     source: DecisionSource = 'USER',
   ): Profile | null {
+    if (status === 'DISCARDED') return this.discardManual(id, reason)
     const current = this.getById(id)
     if (!current) return null
     const ts = nowIso()
@@ -392,6 +394,107 @@ export class ProfileStore {
       )
       .run(status, reason, ts, id)
     this.appendLog(id, current.reviewStatus, status, reason, source, ts)
+    return this.getById(id)
+  }
+
+  /** Human discard. SQLite only. Does not call PinaLove. Row and provenance stay. */
+  discardManual(id: string, note: string | null = null): Profile | null {
+    const current = this.getById(id)
+    if (!current) return null
+    const ts = nowIso()
+    const trimmed = note?.trim() ?? ''
+    const reason = trimmed && trimmed !== 'Manual discard' ? `Manual discard: ${trimmed}` : 'Manual discard'
+    this.db
+      .prepare(
+        `UPDATE profiles SET
+          review_status = ?, contact_status = ?, decision_reason = ?,
+          last_human_action_at = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run('DISCARDED', 'NONE', reason, ts, ts, id)
+    this.appendLog(id, current.reviewStatus, 'DISCARDED', reason, 'USER', ts)
+    return this.getById(id)
+  }
+
+  /** Restore a discarded row from persisted facts. No PinaLove requests. */
+  restoreFromDiscard(id: string, now = Date.now()): Profile | null {
+    const current = this.getById(id)
+    if (!current) return null
+    const ts = nowIso()
+    const classified = classifyListsNewMatch({
+      gender: current.gender,
+      faceVerified: current.faceVerified,
+      hasChildren: current.hasChildren,
+      maritalHistory: current.maritalHistory,
+      religion: current.religion,
+      occupation: current.occupation,
+      dataConflict: current.dataConflicts.length > 0,
+    })
+    const assigned = assignContact({
+      reviewStatus: classified.status,
+      contactStatus: 'NONE',
+      location: current.location,
+      country: current.country,
+      lastActivityAt: current.lastActivityAt,
+      faceVerified: current.faceVerified,
+      hasChildren: current.hasChildren,
+      now,
+    })
+    let contactStatus = assigned.contactStatus
+    if (current.repliedAt) contactStatus = 'REPLIED'
+    else if (current.manuallySentAt) contactStatus = 'PROBE_SENT'
+    const freezeDraft = Boolean(current.manuallySentAt) || contactStatus === 'REPLIED' || contactStatus === 'NO_RESPONSE' || contactStatus === 'PROBE_SENT'
+    let draft = current.draftMessage
+    let draftAt = current.draftCreatedAt
+    if (!freezeDraft && contactStatus === 'STALE_LOCAL_PROBE') {
+      draft = generateStaleProbeDraft(current.location)
+      draftAt = ts
+    }
+    if (!freezeDraft && contactStatus === 'READY_TO_CONTACT') {
+      const occupationFact = current.facts.find((f) => f.field === 'occupation' && f.confidence === 'EXPLICIT')
+      draft = generateOpeningDraft({
+        username: current.username,
+        location: current.location,
+        headline: current.headline,
+        bio: current.bio,
+        occupation: typeof occupationFact?.value === 'string' ? occupationFact.value : null,
+        occupationConfidence: occupationFact?.confidence ?? null,
+        facts: current.facts,
+      })
+      draftAt = ts
+    }
+    this.db
+      .prepare(
+        `UPDATE profiles SET
+          review_status = ?, classification_reasons = ?, missing_detail = ?,
+          contact_status = ?, draft_message = ?, draft_created_at = ?, proposed_message = ?,
+          logistic_priority = ?, priority_reasons = ?, uncertainty_reasons = ?,
+          last_human_action_at = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(
+        classified.status,
+        JSON.stringify(classified.reasons),
+        JSON.stringify(classified.missingDetail),
+        contactStatus,
+        draft,
+        draftAt,
+        draft,
+        assigned.logisticPriority,
+        JSON.stringify(assigned.priorityReasons),
+        JSON.stringify(assigned.uncertaintyReasons),
+        ts,
+        ts,
+        id,
+      )
+    this.appendLog(
+      id,
+      current.reviewStatus,
+      classified.status,
+      'restored by user; reclassified from existing facts',
+      'USER',
+      ts,
+    )
     return this.getById(id)
   }
 

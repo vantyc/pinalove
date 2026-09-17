@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { fetchStats } from './api'
+import { fetchSession, fetchStats } from './api'
 import type { DashboardStats } from '../../shared/types.ts'
 
 export type ShellContext = {
@@ -10,6 +10,7 @@ export type ShellContext = {
 
 export function AppShell() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [user, setUser] = useState<string | null>(null)
 
   async function refreshStats() {
     try {
@@ -21,6 +22,17 @@ export function AppShell() {
 
   useEffect(() => {
     void refreshStats()
+    void fetchSession()
+      .then((s) => setUser(s.user))
+      .catch(() => setUser(null))
+  }, [])
+
+  useEffect(() => {
+    function onPageShow(event: PageTransitionEvent) {
+      if (event.persisted) window.location.reload()
+    }
+    window.addEventListener('pageshow', onPageShow)
+    return () => window.removeEventListener('pageshow', onPageShow)
   }, [])
 
   return (
@@ -42,6 +54,13 @@ export function AppShell() {
         <NavLink to="/discarded">
           Discarded <span className="count">{stats?.discarded ?? ''}</span>
         </NavLink>
+        <div className="nav-session">
+          <p className="nav-session-label">Signed in</p>
+          {user ? <p className="nav-session-user">{user}</p> : null}
+          <a className="btn" href="/logout">
+            Log out
+          </a>
+        </div>
       </nav>
       <main className="main">
         <Outlet context={{ stats, refreshStats } satisfies ShellContext} />

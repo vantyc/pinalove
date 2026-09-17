@@ -81,6 +81,7 @@ export function createApp(opts: ServerOptions = {}) {
       return
     }
 
+    let sessionUser: string | null = null
     if (authProxyHeader) {
       const raw = req.headers[authProxyHeader.toLowerCase()]
       const value = Array.isArray(raw) ? raw[0] : raw
@@ -91,11 +92,12 @@ export function createApp(opts: ServerOptions = {}) {
         }
         res.writeHead(302, {
           Location: loginRedirect,
-          'Cache-Control': 'no-store',
+          'Cache-Control': 'private, no-store, no-cache, must-revalidate',
         })
         res.end()
         return
       }
+      sessionUser = String(value).trim()
     }
 
     if (pathname === BASE_PATH || pathname === `${BASE_PATH}/`) {
@@ -106,7 +108,7 @@ export function createApp(opts: ServerOptions = {}) {
     }
 
     if (pathname.startsWith(`${BASE_PATH}/api/`)) {
-      await handleApi(req, res, method, pathname, url, store)
+      await handleApi(req, res, method, pathname, url, store, sessionUser)
       return
     }
 
@@ -137,8 +139,14 @@ async function handleApi(
   pathname: string,
   url: URL,
   store: ProfileStore,
+  sessionUser: string | null,
 ): Promise<void> {
   const apiPath = pathname.slice(`${BASE_PATH}/api`.length)
+
+  if (method === 'GET' && apiPath === '/session') {
+    sendJson(res, 200, { user: sessionUser })
+    return
+  }
 
   if (method === 'GET' && apiPath === '/dashboard/stats') {
     sendJson(res, 200, store.stats())
@@ -265,6 +273,24 @@ async function handleApi(
       }
       if (parsed.data.action === 'mark-sent') {
         const profile = store.markContactSent(id)
+        if (!profile) {
+          sendJson(res, 404, { error: 'profile not found' })
+          return
+        }
+        sendJson(res, 200, profile)
+        return
+      }
+      if (parsed.data.action === 'discard') {
+        const profile = store.discardManual(id, parsed.data.notes ?? null)
+        if (!profile) {
+          sendJson(res, 404, { error: 'profile not found' })
+          return
+        }
+        sendJson(res, 200, profile)
+        return
+      }
+      if (parsed.data.action === 'restore') {
+        const profile = store.restoreFromDiscard(id)
         if (!profile) {
           sendJson(res, 404, { error: 'profile not found' })
           return

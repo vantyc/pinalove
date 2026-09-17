@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import type { Profile } from '../../shared/types.ts'
-import { fetchProfiles, patchStatus } from './api'
+import { fetchProfiles, patchContact, patchStatus } from './api'
 import { FlagList, StatusPill } from './FlagList'
 import { ProposedMessage } from './ProposedMessage'
 import { ScorePanel } from './ScorePanel'
@@ -58,8 +58,17 @@ export function ShortlistPage() {
           <ProposedMessage profile={p} />
           <StatusActions
             current={p.reviewStatus}
+            profile={p}
             onMove={async (status, reason) => {
               await patchStatus(p.id, status, reason)
+              await load()
+            }}
+            onDiscard={async () => {
+              await patchContact(p.id, { action: 'discard' })
+              await load()
+            }}
+            onRestore={async () => {
+              await patchContact(p.id, { action: 'restore' })
               await load()
             }}
           />

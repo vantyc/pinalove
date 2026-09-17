@@ -1,5 +1,6 @@
 import type { Profile } from '../../shared/types.ts'
 import { scoreShouldBeWithheld } from '../../shared/workflow.ts'
+import { confirmDiscard } from './discard.ts'
 import { patchContact } from './api'
 
 const SENT_CONFIRMATION = 'Confirm that you manually sent this message on PinaLove.'
@@ -13,13 +14,15 @@ export function ProbeDraft({
   onChange: (next: Profile) => void
   title?: string
 }) {
+  const discarded = profile.reviewStatus === 'DISCARDED'
   const draft = profile.draftMessage
-  if (!draft) return null
   const sent = profile.contactStatus === 'PROBE_SENT'
   const terminal = profile.contactStatus === 'REPLIED' || profile.contactStatus === 'NO_RESPONSE'
+  const actionable = !discarded
 
   async function copy() {
-    await navigator.clipboard.writeText(draft ?? '')
+    if (!draft) return
+    await navigator.clipboard.writeText(draft)
   }
 
   async function markSent() {
@@ -33,38 +36,57 @@ export function ProbeDraft({
     onChange(next)
   }
 
+  async function discard() {
+    if (!confirmDiscard(profile)) return
+    const next = await patchContact(profile.id, { action: 'discard' })
+    onChange(next)
+  }
+
+  if (discarded && !draft) return null
+
   return (
     <div className="panel">
-      <h2>{title}</h2>
-      <p className="kind">DRAFT ONLY — NOT SENT BY THIS APP</p>
-      {sent ? (
-        <p className="muted">Marked as sent at {profile.manuallySentAt}. This app did not send it.</p>
+      {draft ? (
+        <>
+          <h2>{title}</h2>
+          <p className="kind">DRAFT ONLY — NOT SENT BY THIS APP</p>
+          {sent ? (
+            <p className="muted">Marked as sent at {profile.manuallySentAt}. This app did not send it.</p>
+          ) : null}
+          {terminal ? <p className="muted">Human outcome: {profile.contactStatus.replaceAll('_', ' ')}</p> : null}
+          <div className="message-box">{draft}</div>
+        </>
       ) : null}
-      {terminal ? <p className="muted">Human outcome: {profile.contactStatus.replaceAll('_', ' ')}</p> : null}
-      <div className="message-box">{draft}</div>
-      <div className="actions" style={{ marginTop: '0.7rem' }}>
-        <button className="btn primary" type="button" onClick={() => void copy()}>
-          Copy message
-        </button>
-        <a className="btn" href={profile.profileUrl} target="_blank" rel="noreferrer">
-          Open profile
-        </a>
-        {sent || terminal ? null : (
-          <button className="btn" type="button" onClick={() => void markSent()}>
-            Mark as sent
+      {actionable ? (
+        <div className="actions" style={{ marginTop: '0.7rem' }}>
+          <button className="btn danger" type="button" onClick={() => void discard()}>
+            Discard
           </button>
-        )}
-        {sent && !terminal ? (
-          <>
-            <button className="btn" type="button" onClick={() => void markOutcome('replied')}>
-              REPLIED
+          {draft ? (
+            <button className="btn primary" type="button" onClick={() => void copy()}>
+              Copy message
             </button>
-            <button className="btn" type="button" onClick={() => void markOutcome('no-response')}>
-              NO_RESPONSE
+          ) : null}
+          <a className="btn" href={profile.profileUrl} target="_blank" rel="noreferrer">
+            Open profile
+          </a>
+          {sent || terminal ? null : (
+            <button className="btn" type="button" onClick={() => void markSent()}>
+              Mark as sent
             </button>
-          </>
-        ) : null}
-      </div>
+          )}
+          {sent && !terminal ? (
+            <>
+              <button className="btn" type="button" onClick={() => void markOutcome('replied')}>
+                REPLIED
+              </button>
+              <button className="btn" type="button" onClick={() => void markOutcome('no-response')}>
+                NO_RESPONSE
+              </button>
+            </>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

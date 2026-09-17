@@ -69,12 +69,14 @@ img {
 }
 
 .nav {
-  padding: 1.25rem 1rem 2rem;
+  padding: 1.25rem 1rem 1rem;
   border-right: 1px solid var(--line);
   background: rgba(20, 15, 18, 0.8);
   position: sticky;
   top: 0;
   height: 100dvh;
+  display: flex;
+  flex-direction: column;
 }
 
 .brand {
@@ -114,6 +116,32 @@ img {
   color: var(--gold);
   font-variant-numeric: tabular-nums;
   font-size: 0.85rem;
+}
+
+.nav-session {
+  margin-top: auto;
+  padding: 0.85rem 0.7rem 0.4rem;
+  border-top: 1px solid var(--line);
+}
+
+.nav-session-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.nav-session-user {
+  margin: 0.2rem 0 0.7rem;
+  font-size: 0.9rem;
+  word-break: break-all;
+}
+
+.nav-session .btn {
+  display: inline-block;
+  text-align: center;
+  width: 100%;
 }
 
 .stats {

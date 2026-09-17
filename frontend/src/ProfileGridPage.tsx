@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import type { Profile, ProfileFilters, ReviewStatus } from '../../shared/types.ts'
-import { fetchProfiles, patchStatus } from './api'
+import { fetchProfiles, patchContact, patchStatus } from './api'
 import type { ShellContext } from './AppShell'
 import { FilterBar } from './FilterBar'
 import { ProfileCard } from './ProfileCard'
@@ -56,6 +56,18 @@ export function ProfileGridPage({
     await refreshStats()
   }
 
+  async function onDiscard(id: string) {
+    await patchContact(id, { action: 'discard' })
+    await load()
+    await refreshStats()
+  }
+
+  async function onRestore(id: string) {
+    await patchContact(id, { action: 'restore' })
+    await load()
+    await refreshStats()
+  }
+
   return (
     <section>
       <div className="page-head">
@@ -79,6 +91,8 @@ export function ProfileGridPage({
             dense={dense}
             onOpen={() => navigate(`/profiles/${p.id}`)}
             onMove={onMove}
+            onDiscard={onDiscard}
+            onRestore={onRestore}
           />
         ))}
       </div>

@@ -474,6 +474,13 @@ describe('api + store', () => {
       assert.equal(ok.status, 200)
       const stats = await ok.json()
       assert.equal(typeof stats.total, 'number')
+      const session = await fetch(`${url}/pinalove/api/session`, {
+        headers: { 'X-Viajes-User': 'tester' },
+      })
+      assert.equal(session.status, 200)
+      assert.equal((await session.json()).user, 'tester')
+      const sessionAnon = await fetch(`${url}/pinalove/api/session`)
+      assert.equal(sessionAnon.status, 401)
     } finally {
       gated.close()
       rmSync(gatedDir, { recursive: true, force: true })
@@ -490,5 +497,154 @@ describe('api + store', () => {
     const deploy = readFileSync(join(process.cwd(), 'deploy/k3s/00-deployment.yaml'), 'utf8')
     assert.match(deploy, /AUTH_PROXY_HEADER/)
     assert.match(deploy, /X-Viajes-User/)
+  })
+
+  it('manual discard is SQLite-only, keeps the row, and leaves the message queues', async () => {
+    const base = await listen()
+    const imported = await fetch(`${base}/pinalove/api/profiles/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        profiles: [
+          {
+            externalId: 'discard-manual-1',
+            username: 'DiscardMe',
+            profileUrl: 'https://www.pinalove.com/DiscardMe',
+            source: 'PINALOVE',
+            location: 'Cebu',
+            country: 'PH',
+            lastActivityAt: '2026-09-16T12:00:00.000Z',
+            faceVerified: 'YES',
+            photoVerified: true,
+            hasChildren: 'NO',
+            maritalHistory: 'NEVER_MARRIED',
+            occupation: 'nurse',
+            facts: [
+              {
+                field: 'occupation',
+                value: 'nurse',
+                source: 'DESCRIPTION',
+                evidence: 'nurse',
+                confidence: 'EXPLICIT',
+              },
+            ],
+            reviewStatus: 'PRESELECTED',
+          },
+        ],
+      }),
+    })
+    assert.equal((await imported.json()).imported, 1)
+    app.store.applyLocalWorkflow(Date.parse('2026-09-16T19:00:00.000Z'))
+    const listed = await (await fetch(`${base}/pinalove/api/profiles`)).json()
+    const row = listed.profiles.find((p: { username: string }) => p.username === 'DiscardMe')
+    assert.equal(row.contactStatus, 'READY_TO_CONTACT')
+    assert.ok(row.draftMessage)
+    const factsBefore = JSON.stringify(row.facts)
+    const photoBefore = row.primaryPhotoUrl
+    const statsBefore = await (await fetch(`${base}/pinalove/api/dashboard/stats`)).json()
+
+    const discarded = await fetch(`${base}/pinalove/api/profiles/${row.id}/contact`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'discard' }),
+    })
+    const after = await discarded.json()
+    assert.equal(after.reviewStatus, 'DISCARDED')
+    assert.equal(after.contactStatus, 'NONE')
+    assert.equal(after.decisionReason, 'Manual discard')
+    assert.ok(after.lastHumanActionAt)
+    assert.equal(JSON.stringify(after.facts), factsBefore)
+    assert.equal(after.draftMessage, row.draftMessage)
+    assert.ok(app.store.getById(row.id))
+    const statsAfter = await (await fetch(`${base}/pinalove/api/dashboard/stats`)).json()
+    assert.equal(statsAfter.discarded, statsBefore.discarded + 1)
+    assert.equal(statsAfter.readyToContact, statsBefore.readyToContact - 1)
+    assert.equal(statsAfter.preselected, statsBefore.preselected - 1)
+    const sendmessage = await fetch(`${base}/pinalove/api/sendmessage`, { method: 'POST' })
+    assert.equal(sendmessage.status, 404)
+    void photoBefore
+
+    const restored = await fetch(`${base}/pinalove/api/profiles/${row.id}/contact`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'restore' }),
+    })
+    const back = await restored.json()
+    assert.equal(back.reviewStatus, 'PRESELECTED')
+    assert.equal(back.contactStatus, 'READY_TO_CONTACT')
+    assert.ok(back.lastHumanActionAt)
+    const history = await (await fetch(`${base}/pinalove/api/profiles/${row.id}/history`)).json()
+    assert.ok(history.history.some((h: { reason: string }) => /manual discard/i.test(h.reason)))
+    assert.ok(history.history.some((h: { reason: string }) => /restored by user/i.test(h.reason)))
+  })
+
+  it('STALE_LOCAL_PROBE discard leaves the local probe queue', async () => {
+    const base = await listen()
+    const imported = await fetch(`${base}/pinalove/api/profiles/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        profiles: [
+          {
+            externalId: 'discard-stale-1',
+            username: 'StaleDiscard',
+            profileUrl: 'https://www.pinalove.com/StaleDiscard',
+            source: 'PINALOVE_BROWSE',
+            location: 'Mexico City',
+            country: 'Mexico',
+            lastActivityAt: '2025-01-01T00:00:00.000Z',
+            faceVerified: 'YES',
+            photoVerified: true,
+            hasChildren: 'UNKNOWN',
+            maritalHistory: 'UNKNOWN',
+            reviewStatus: 'NEEDS_DETAIL',
+          },
+        ],
+      }),
+    })
+    assert.equal((await imported.json()).imported, 1)
+    app.store.applyLocalWorkflow(Date.parse('2026-09-16T19:00:00.000Z'))
+    const listed = await (await fetch(`${base}/pinalove/api/profiles`)).json()
+    const row = listed.profiles.find((p: { username: string }) => p.username === 'StaleDiscard')
+    assert.equal(row.contactStatus, 'STALE_LOCAL_PROBE')
+    assert.equal(row.reviewStatus, 'NEEDS_DETAIL')
+    const after = await (
+      await fetch(`${base}/pinalove/api/profiles/${row.id}/contact`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'discard' }),
+      })
+    ).json()
+    assert.equal(after.reviewStatus, 'DISCARDED')
+    assert.equal(after.contactStatus, 'NONE')
+    const stats = await (await fetch(`${base}/pinalove/api/dashboard/stats`)).json()
+    assert.equal(
+      (await (await fetch(`${base}/pinalove/api/profiles?contactStatus=STALE_LOCAL_PROBE`)).json()).profiles.some(
+        (p: { username: string }) => p.username === 'StaleDiscard',
+      ),
+      false,
+    )
+    assert.ok(stats.staleLocalProbe >= 0)
+  })
+
+  it('UI logout uses existing /logout and Discard stays local', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const shell = readFileSync(join(process.cwd(), 'frontend/src/AppShell.tsx'), 'utf8')
+    assert.match(shell, /href="\/logout"/)
+    assert.equal(/window\.location\s*=\s*['"]\/login['"]/.test(shell), false)
+    const draftUi = readFileSync(join(process.cwd(), 'frontend/src/ProbeDraft.tsx'), 'utf8')
+    assert.match(draftUi, />\s*Discard\s*</)
+    assert.match(draftUi, /Copy message/)
+    assert.match(draftUi, /Open profile/)
+    assert.match(draftUi, /Mark as sent/)
+    assert.equal(/sendmessage|playlikeuser|hideuser|playhideuser|blockuser/i.test(draftUi), false)
+    const confirm = readFileSync(join(process.cwd(), 'frontend/src/discard.ts'), 'utf8')
+    assert.match(confirm, /Discard this profile from your review queue\?/)
+    assert.match(confirm, /already marked as sent/)
+    assert.match(confirm, /recorded reply/)
+    const store = readFileSync(join(process.cwd(), 'backend/src/store.ts'), 'utf8')
+    assert.match(store, /discardManual/)
+    assert.equal(/pinalove\.com\/nt|sendmessage|hideuser|blockuser/i.test(store), false)
   })
 })

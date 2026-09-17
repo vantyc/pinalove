@@ -25,11 +25,15 @@ export function ProfileCard({
   profile,
   onOpen,
   onMove,
+  onDiscard,
+  onRestore,
   dense = false,
 }: {
   profile: Profile
   onOpen: () => void
   onMove: (id: string, status: ReviewStatus, reason?: string) => void
+  onDiscard?: (id: string) => void
+  onRestore?: (id: string) => void
   dense?: boolean
 }) {
   const reasons =
@@ -97,7 +101,10 @@ export function ProfileCard({
           </button>
           <StatusActions
             current={profile.reviewStatus}
+            profile={profile}
             onMove={(status, reason) => onMove(profile.id, status, reason)}
+            onDiscard={onDiscard ? () => onDiscard(profile.id) : undefined}
+            onRestore={onRestore ? () => onRestore(profile.id) : undefined}
           />
         </div>
       </div>

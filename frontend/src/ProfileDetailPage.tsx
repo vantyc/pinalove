@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useOutletContext, useParams } from 'react-router-dom'
 import type { DecisionLog, Profile } from '../../shared/types.ts'
-import { fetchHistory, fetchProfile, patchStatus } from './api'
+import { fetchHistory, fetchProfile, patchContact, patchStatus } from './api'
 import type { ShellContext } from './AppShell'
 import { FactsPanel, BioPanel } from './FactsPanel'
 import { FlagList, StatusPill } from './FlagList'
@@ -125,8 +125,23 @@ export function ProfileDetailPage() {
             <h2>Move</h2>
             <StatusActions
               current={profile.reviewStatus}
+              profile={profile}
               onMove={async (status, reason) => {
                 const next = await patchStatus(profile.id, status, reason)
+                setProfile(next)
+                const h = await fetchHistory(profile.id)
+                setHistory(h.history)
+                await refreshStats()
+              }}
+              onDiscard={async () => {
+                const next = await patchContact(profile.id, { action: 'discard' })
+                setProfile(next)
+                const h = await fetchHistory(profile.id)
+                setHistory(h.history)
+                await refreshStats()
+              }}
+              onRestore={async () => {
+                const next = await patchContact(profile.id, { action: 'restore' })
                 setProfile(next)
                 const h = await fetchHistory(profile.id)
                 setHistory(h.history)
