@@ -87,4 +87,14 @@ describe('evaluateProfile', () => {
     assert.equal(cdmx?.kind, 'inferred')
     assert.equal(mx?.kind, 'declared')
   })
+
+  it('does not score proximity when distanceKm is absent', () => {
+    const result = evaluateProfile(base({ distanceKm: null }))
+    assert.equal(result.reasons.some((r) => r.code === 'proximity'), false)
+  })
+
+  it('does not treat anomalous listsnew distanceRaw-as-km as proximity', () => {
+    const result = evaluateProfile(base({ distanceKm: 13304 }))
+    assert.equal(result.reasons.some((r) => r.code === 'proximity'), false)
+  })
 })

@@ -2,6 +2,8 @@ import { z } from 'zod'
 import {
   DECISIONS,
   DECISION_SOURCES,
+  FACT_CONFIDENCES,
+  FACT_SOURCES,
   FLAG_CODES,
   FILTER_SHORTCUTS,
   MARITAL_HISTORIES,
@@ -11,6 +13,19 @@ import {
   REVIEW_STATUSES,
   TRISTATES,
 } from '../../shared/types.ts'
+
+const fieldFactSchema = z.object({
+  rawValue: z.unknown(),
+  normalizedValue: z.unknown(),
+})
+
+const provenanceSchema = z.object({
+  field: z.string(),
+  value: z.unknown(),
+  source: z.enum(FACT_SOURCES),
+  evidence: z.string().nullable(),
+  confidence: z.enum(FACT_CONFIDENCES),
+})
 
 export const importProfileSchema = z.object({
   externalId: z.string().min(1).nullable().optional(),
@@ -22,6 +37,7 @@ export const importProfileSchema = z.object({
   location: z.string().nullable().optional(),
   country: z.string().nullable().optional(),
   distanceKm: z.number().nonnegative().nullable().optional(),
+  distanceRaw: z.number().nullable().optional(),
   heightCm: z.number().int().positive().nullable().optional(),
   weightKg: z.number().positive().nullable().optional(),
   relationshipStatus: z.enum(RELATIONSHIP_STATUSES).optional(),
@@ -30,10 +46,19 @@ export const importProfileSchema = z.object({
   wantsChildren: z.enum(TRISTATES).optional(),
   religion: z.string().nullable().optional(),
   religionPracticeLevel: z.enum(RELIGION_PRACTICE_LEVELS).optional(),
+  occupation: z.string().nullable().optional(),
+  education: z.string().nullable().optional(),
+  gender: z.string().nullable().optional(),
+  lastActivityAt: z.string().nullable().optional(),
   headline: z.string().nullable().optional(),
   bio: z.string().nullable().optional(),
   photoVerified: z.boolean().optional(),
+  faceVerified: z.enum(TRISTATES).optional(),
   profileVerified: z.boolean().optional(),
+  fieldFacts: z.record(fieldFactSchema).optional(),
+  facts: z.array(provenanceSchema).optional(),
+  classificationReasons: z.array(z.string()).optional(),
+  missingDetail: z.array(z.string()).optional(),
   source: z.enum(PROFILE_SOURCES).optional(),
   scrapedAt: z.string().nullable().optional(),
   lastSeenAt: z.string().nullable().optional(),
@@ -60,6 +85,11 @@ export const decisionPatchSchema = z.object({
   reason: z.string().nullable().optional(),
 })
 
+export const contactPatchSchema = z.object({
+  action: z.enum(['mark-sent', 'notes', 'replied', 'no-response']),
+  notes: z.string().nullable().optional(),
+})
+
 export const profileListQuerySchema = z.object({
   ageMin: z.coerce.number().int().optional(),
   ageMax: z.coerce.number().int().optional(),
@@ -77,6 +107,7 @@ export const profileListQuerySchema = z.object({
   scoreMin: z.coerce.number().int().optional(),
   scoreMax: z.coerce.number().int().optional(),
   status: z.string().optional(),
+  contactStatus: z.string().optional(),
   flags: z.string().optional(),
   shortcut: z.enum(FILTER_SHORTCUTS).optional(),
   search: z.string().optional(),

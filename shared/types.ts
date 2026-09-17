@@ -2,6 +2,8 @@ export const BASE_PATH = '/pinalove'
 
 export const REVIEW_STATUSES = [
   'UNREVIEWED',
+  'PRESELECTED',
+  'NEEDS_DETAIL',
   'POTENTIAL',
   'SHORTLISTED',
   'DISCARDED',
@@ -9,6 +11,37 @@ export const REVIEW_STATUSES = [
   'CONTACTED',
 ] as const
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number]
+
+/** Contact workflow is separate from classification. */
+export const CONTACT_STATUSES = [
+  'NONE',
+  'STALE_LOCAL_PROBE',
+  'READY_TO_CONTACT',
+  'PROBE_SENT',
+  'REPLIED',
+  'NO_RESPONSE',
+] as const
+export type ContactStatus = (typeof CONTACT_STATUSES)[number]
+
+export const DISTANCE_TRUSTS = ['TRUSTED', 'UNTRUSTED', 'UNKNOWN'] as const
+export type DistanceTrust = (typeof DISTANCE_TRUSTS)[number]
+
+export const LOGISTIC_PRIORITIES = ['HIGH_LOCAL', 'LOCAL', 'NONE'] as const
+export type LogisticPriority = (typeof LOGISTIC_PRIORITIES)[number]
+
+/**
+ * Account-activity buckets. Independent from reviewStatus.
+ * Not a quality or compatibility score.
+ */
+export const ACTIVITY_CATEGORIES = [
+  'ACTIVE_7D',
+  'ACTIVE_30D',
+  'ACTIVE_90D',
+  'STALE_180D',
+  'STALE_365D',
+  'STALE_OVER_365D',
+] as const
+export type ActivityCategory = (typeof ACTIVITY_CATEGORIES)[number]
 
 /** Current declared relationship status. SINGLE ≠ NEVER_MARRIED. */
 export const RELATIONSHIP_STATUSES = [
@@ -52,8 +85,61 @@ export const DECISION_SOURCES = [
 ] as const
 export type DecisionSource = (typeof DECISION_SOURCES)[number]
 
-export const PROFILE_SOURCES = ['IMPORT', 'MANUAL', 'SCRAPER'] as const
+export const PROFILE_SOURCES = [
+  'IMPORT',
+  'MANUAL',
+  'SCRAPER',
+  /** Legacy listsnew matches ingest. Prefer PINALOVE_MATCH for new rows. */
+  'PINALOVE',
+  'PINALOVE_MATCH',
+  'PINALOVE_BROWSE',
+  'MOCK',
+] as const
 export type ProfileSource = (typeof PROFILE_SOURCES)[number]
+
+export type FieldFact = {
+  rawValue: unknown
+  normalizedValue: unknown
+  source?: FactSource
+  evidence?: string | null
+  confidence?: FactConfidence
+}
+
+export type FieldFactMap = Record<string, FieldFact>
+
+export const FACT_SOURCES = [
+  'LISTSNEW_STRUCTURED_FIELD',
+  'BROWSENEW_STRUCTURED_FIELD',
+  'HEADLINE',
+  'DESCRIPTION',
+  'CONFLICT',
+] as const
+export type FactSource = (typeof FACT_SOURCES)[number]
+
+export const FACT_CONFIDENCES = ['STRUCTURED', 'EXPLICIT', 'NONE'] as const
+export type FactConfidence = (typeof FACT_CONFIDENCES)[number]
+
+export type ProvenanceRecord = {
+  field: string
+  value: unknown
+  source: FactSource
+  evidence: string | null
+  confidence: FactConfidence
+}
+
+export type TextSignal = {
+  code: 'FAMILY_ORIENTED' | 'GOD_FEARING' | 'CHRISTIAN_UNSPECIFIED' | 'SINGLE_DECLARED'
+  evidence: string
+  source: 'HEADLINE' | 'DESCRIPTION'
+}
+
+export type DataConflict = {
+  field: string
+  structuredValue: unknown
+  textValue: unknown
+  structuredEvidence: string | null
+  textEvidence: string | null
+}
 
 export const FLAG_CODES = [
   'POSSIBLE_SCAM',
@@ -66,6 +152,7 @@ export const FLAG_CODES = [
   'HAS_CHILDREN',
   'SUSPICIOUS_BIO',
   'NEEDS_MANUAL_REVIEW',
+  'DATA_CONFLICT',
 ] as const
 export type FlagCode = (typeof FLAG_CODES)[number]
 
@@ -84,6 +171,7 @@ export type ScoreReason = {
 
 export type Profile = {
   id: string
+  /** Stable identity when present. MATCH + BROWSE must not duplicate this. */
   externalId: string | null
   username: string
   profileUrl: string
@@ -93,6 +181,9 @@ export type Profile = {
   location: string | null
   country: string | null
   distanceKm: number | null
+  distanceRaw: number | null
+  distanceDisplayKm: number | null
+  distanceTrust: DistanceTrust
   heightCm: number | null
   weightKg: number | null
   relationshipStatus: RelationshipStatus
@@ -101,10 +192,21 @@ export type Profile = {
   wantsChildren: Tristate
   religion: string | null
   religionPracticeLevel: ReligionPracticeLevel
+  occupation: string | null
+  education: string | null
+  gender: string | null
+  lastActivityAt: string | null
   headline: string | null
   bio: string | null
   photoVerified: boolean
+  faceVerified: Tristate
   profileVerified: boolean
+  fieldFacts: FieldFactMap
+  facts: ProvenanceRecord[]
+  textSignals: TextSignal[]
+  dataConflicts: DataConflict[]
+  classificationReasons: string[]
+  missingDetail: string[]
   source: ProfileSource
   scrapedAt: string | null
   lastSeenAt: string | null
@@ -115,6 +217,18 @@ export type Profile = {
   scoreReasons: ScoreReason[]
   flags: FlagCode[]
   proposedMessage: string | null
+  contactStatus: ContactStatus
+  draftMessage: string | null
+  draftCreatedAt: string | null
+  manuallySentAt: string | null
+  repliedAt: string | null
+  lastHumanActionAt: string | null
+  contactNotes: string | null
+  logisticPriority: LogisticPriority
+  priorityReasons: string[]
+  uncertaintyReasons: string[]
+  sources: ProfileSource[]
+  activityCategory: ActivityCategory | null
   createdAt: string
   updatedAt: string
 }
@@ -143,6 +257,7 @@ export type ProfileFilters = {
   scoreMin?: number
   scoreMax?: number
   status?: ReviewStatus | ReviewStatus[]
+  contactStatus?: ContactStatus | ContactStatus[]
   flags?: FlagCode[]
   shortcut?: FilterShortcut
   search?: string
@@ -159,15 +274,33 @@ export const FILTER_SHORTCUTS = [
 ] as const
 export type FilterShortcut = (typeof FILTER_SHORTCUTS)[number]
 
+export type UnknownFieldCounts = {
+  children: number
+  maritalHistory: number
+  religion: number
+  occupation: number
+  gender: number
+  photoVerified: number
+  education: number
+}
+
 export type DashboardStats = {
   total: number
   byStatus: Record<ReviewStatus, number>
   unreviewed: number
+  preselected: number
+  needsDetail: number
   shortlisted: number
   discarded: number
   manualReview: number
   highScore: number
   flagged: number
+  unknownCritical: number
+  unknownByField: UnknownFieldCounts
+  staleLocalProbe: number
+  readyToContact: number
+  probeSent: number
+  actionRequired: number
 }
 
 export type ImportPayload = {
@@ -184,6 +317,7 @@ export type ImportProfileInput = {
   location?: string | null
   country?: string | null
   distanceKm?: number | null
+  distanceRaw?: number | null
   heightCm?: number | null
   weightKg?: number | null
   relationshipStatus?: RelationshipStatus
@@ -192,11 +326,23 @@ export type ImportProfileInput = {
   wantsChildren?: Tristate
   religion?: string | null
   religionPracticeLevel?: ReligionPracticeLevel
+  occupation?: string | null
+  education?: string | null
+  gender?: string | null
+  lastActivityAt?: string | null
   headline?: string | null
   bio?: string | null
   photoVerified?: boolean
+  faceVerified?: Tristate
   profileVerified?: boolean
+  fieldFacts?: FieldFactMap
+  facts?: ProvenanceRecord[]
+  textSignals?: TextSignal[]
+  dataConflicts?: DataConflict[]
+  classificationReasons?: string[]
+  missingDetail?: string[]
   source?: ProfileSource
+  sources?: ProfileSource[]
   scrapedAt?: string | null
   lastSeenAt?: string | null
   reviewStatus?: ReviewStatus
@@ -277,4 +423,5 @@ export const FLAG_LABELS: Record<FlagCode, string> = {
   HAS_CHILDREN: 'Declared as having children',
   SUSPICIOUS_BIO: 'Possible suspicious phrasing in bio',
   NEEDS_MANUAL_REVIEW: 'Needs manual review',
+  DATA_CONFLICT: 'Structured field conflicts with an explicit bio statement',
 }

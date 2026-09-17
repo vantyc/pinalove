@@ -11,6 +11,11 @@ data
 .env
 .env.*
 *.local
+fixtures/browse-deck-fase3a.json
+*.har
+storageState*.json
+chrome-profile/
+chromium-profile/
 .vscode
 .idea
 .DS_Store

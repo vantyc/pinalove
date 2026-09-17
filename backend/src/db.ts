@@ -40,6 +40,32 @@ CREATE TABLE IF NOT EXISTS profiles (
   score_reasons TEXT NOT NULL DEFAULT '[]',
   flags TEXT NOT NULL DEFAULT '[]',
   proposed_message TEXT,
+  education TEXT,
+  occupation TEXT,
+  last_activity_at TEXT,
+  gender TEXT,
+  distance_raw REAL,
+  face_verified TEXT NOT NULL DEFAULT 'UNKNOWN',
+  field_facts TEXT NOT NULL DEFAULT '{}',
+  classification_reasons TEXT NOT NULL DEFAULT '[]',
+  missing_detail TEXT NOT NULL DEFAULT '[]',
+  facts TEXT NOT NULL DEFAULT '[]',
+  text_signals TEXT NOT NULL DEFAULT '[]',
+  data_conflicts TEXT NOT NULL DEFAULT '[]',
+  contact_status TEXT NOT NULL DEFAULT 'NONE',
+  draft_message TEXT,
+  draft_created_at TEXT,
+  manually_sent_at TEXT,
+  replied_at TEXT,
+  last_human_action_at TEXT,
+  contact_notes TEXT,
+  distance_trust TEXT NOT NULL DEFAULT 'UNKNOWN',
+  distance_display_km REAL,
+  logistic_priority TEXT NOT NULL DEFAULT 'NONE',
+  priority_reasons TEXT NOT NULL DEFAULT '[]',
+  uncertainty_reasons TEXT NOT NULL DEFAULT '[]',
+  sources TEXT NOT NULL DEFAULT '[]',
+  activity_category TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -72,9 +98,52 @@ CREATE TABLE IF NOT EXISTS app_config (
 );
 `
 
+const PROFILE_MIGRATIONS: { name: string; ddl: string }[] = [
+  { name: 'education', ddl: 'TEXT' },
+  { name: 'occupation', ddl: 'TEXT' },
+  { name: 'last_activity_at', ddl: 'TEXT' },
+  { name: 'gender', ddl: 'TEXT' },
+  { name: 'distance_raw', ddl: 'REAL' },
+  { name: 'face_verified', ddl: "TEXT NOT NULL DEFAULT 'UNKNOWN'" },
+  { name: 'field_facts', ddl: "TEXT NOT NULL DEFAULT '{}'" },
+  { name: 'classification_reasons', ddl: "TEXT NOT NULL DEFAULT '[]'" },
+  { name: 'missing_detail', ddl: "TEXT NOT NULL DEFAULT '[]'" },
+  { name: 'facts', ddl: "TEXT NOT NULL DEFAULT '[]'" },
+  { name: 'text_signals', ddl: "TEXT NOT NULL DEFAULT '[]'" },
+  { name: 'data_conflicts', ddl: "TEXT NOT NULL DEFAULT '[]'" },
+  { name: 'contact_status', ddl: "TEXT NOT NULL DEFAULT 'NONE'" },
+  { name: 'draft_message', ddl: 'TEXT' },
+  { name: 'draft_created_at', ddl: 'TEXT' },
+  { name: 'manually_sent_at', ddl: 'TEXT' },
+  { name: 'replied_at', ddl: 'TEXT' },
+  { name: 'last_human_action_at', ddl: 'TEXT' },
+  { name: 'contact_notes', ddl: 'TEXT' },
+  { name: 'distance_trust', ddl: "TEXT NOT NULL DEFAULT 'UNKNOWN'" },
+  { name: 'distance_display_km', ddl: 'REAL' },
+  { name: 'logistic_priority', ddl: "TEXT NOT NULL DEFAULT 'NONE'" },
+  { name: 'priority_reasons', ddl: "TEXT NOT NULL DEFAULT '[]'" },
+  { name: 'uncertainty_reasons', ddl: "TEXT NOT NULL DEFAULT '[]'" },
+  { name: 'sources', ddl: "TEXT NOT NULL DEFAULT '[]'" },
+  { name: 'activity_category', ddl: 'TEXT' },
+]
+
+function migrateProfiles(db: DatabaseSync): void {
+  const cols = db.prepare('PRAGMA table_info(profiles)').all() as Array<{ name: string }>
+  const have = new Set(cols.map((c) => c.name))
+  for (const col of PROFILE_MIGRATIONS) {
+    if (have.has(col.name)) continue
+    db.exec(`ALTER TABLE profiles ADD COLUMN ${col.name} ${col.ddl}`)
+  }
+  db.exec('DROP INDEX IF EXISTS idx_profiles_external_id')
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_external_id ON profiles(external_id) WHERE external_id IS NOT NULL',
+  )
+}
+
 export function openDatabase(sqlitePath: string): DatabaseSync {
   mkdirSync(dirname(sqlitePath), { recursive: true })
   const db = new DatabaseSync(sqlitePath)
   db.exec(SCHEMA_SQL)
+  migrateProfiles(db)
   return db
 }

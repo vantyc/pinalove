@@ -2,12 +2,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFileSync, existsSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { DEFAULT_RULE_CONFIG } from '../../shared/defaultRules.ts'
-import { BASE_PATH, FLAG_CODES, REVIEW_STATUSES } from '../../shared/types.ts'
-import type { FlagCode, ReviewStatus, RuleConfig } from '../../shared/types.ts'
+import { BASE_PATH, CONTACT_STATUSES, FLAG_CODES, REVIEW_STATUSES } from '../../shared/types.ts'
+import type { ContactStatus, FlagCode, ImportProfileInput, ReviewStatus, RuleConfig } from '../../shared/types.ts'
 import { openDatabase } from './db.ts'
 import { isForbiddenApiPath } from './safety.ts'
 import {
   decisionPatchSchema,
+  contactPatchSchema,
   importPayloadSchema,
   profileListQuerySchema,
   statusPatchSchema,
@@ -50,9 +51,10 @@ export function createApp(opts: ServerOptions = {}) {
     const parsed = importPayloadSchema.safeParse(raw)
     if (parsed.success) {
       const profiles = Array.isArray(parsed.data) ? parsed.data : parsed.data.profiles
-      store.importProfiles(profiles)
+      store.importProfiles(profiles as ImportProfileInput[])
     }
   }
+  store.applyLocalWorkflow()
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const host = req.headers.host ?? 'localhost'
@@ -142,10 +144,12 @@ async function handleApi(
     }
     const q = parsed.data
     const status = parseStatusParam(q.status)
+    const contactStatus = parseContactStatusParam(q.contactStatus)
     const flags = parseFlagsParam(q.flags)
     const profiles = store.list({
       ...q,
       status,
+      contactStatus,
       flags,
     })
     sendJson(res, 200, { profiles, total: profiles.length })
@@ -160,11 +164,11 @@ async function handleApi(
       return
     }
     const profiles = Array.isArray(parsed.data) ? parsed.data : parsed.data.profiles
-    sendJson(res, 200, store.importProfiles(profiles))
+    sendJson(res, 200, store.importProfiles(profiles as ImportProfileInput[]))
     return
   }
 
-  const profileMatch = apiPath.match(/^\/profiles\/([^/]+)(?:\/(status|decision|history|rescore))?$/)
+  const profileMatch = apiPath.match(/^\/profiles\/([^/]+)(?:\/(status|decision|history|rescore|contact))?$/)
   if (profileMatch) {
     const id = decodeURIComponent(profileMatch[1])
     const action = profileMatch[2]
@@ -228,6 +232,41 @@ async function handleApi(
       sendJson(res, 200, store.getById(id))
       return
     }
+    if (method === 'PATCH' && action === 'contact') {
+      const parsed = contactPatchSchema.safeParse(await readJson(req))
+      if (!parsed.success) {
+        sendJson(res, 400, { error: 'invalid contact payload', details: parsed.error.flatten() })
+        return
+      }
+      if (parsed.data.action === 'mark-sent') {
+        const profile = store.markContactSent(id)
+        if (!profile) {
+          sendJson(res, 404, { error: 'profile not found' })
+          return
+        }
+        sendJson(res, 200, profile)
+        return
+      }
+      if (parsed.data.action === 'replied' || parsed.data.action === 'no-response') {
+        const profile = store.markContactOutcome(
+          id,
+          parsed.data.action === 'replied' ? 'REPLIED' : 'NO_RESPONSE',
+        )
+        if (!profile) {
+          sendJson(res, 404, { error: 'profile not found' })
+          return
+        }
+        sendJson(res, 200, profile)
+        return
+      }
+      const profile = store.updateContactNotes(id, parsed.data.notes ?? null)
+      if (!profile) {
+        sendJson(res, 404, { error: 'profile not found' })
+        return
+      }
+      sendJson(res, 200, profile)
+      return
+    }
   }
 
   sendJson(res, 404, { error: 'not found' })
@@ -238,6 +277,16 @@ function parseStatusParam(raw?: string): ReviewStatus | ReviewStatus[] | undefin
   const parts = raw.split(',').filter(Boolean) as ReviewStatus[]
   const valid = parts.filter((p): p is ReviewStatus =>
     (REVIEW_STATUSES as readonly string[]).includes(p),
+  )
+  if (valid.length === 0) return undefined
+  return valid.length === 1 ? valid[0] : valid
+}
+
+function parseContactStatusParam(raw?: string): ContactStatus | ContactStatus[] | undefined {
+  if (!raw) return undefined
+  const parts = raw.split(',').filter(Boolean) as ContactStatus[]
+  const valid = parts.filter((p): p is ContactStatus =>
+    (CONTACT_STATUSES as readonly string[]).includes(p),
   )
   if (valid.length === 0) return undefined
   return valid.length === 1 ? valid[0] : valid

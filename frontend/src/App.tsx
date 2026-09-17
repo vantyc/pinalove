@@ -1,24 +1,34 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './AppShell'
+import { DashboardPage } from './DashboardPage'
 import { ProfileDetailPage } from './ProfileDetailPage'
 import { ProfileGridPage } from './ProfileGridPage'
-import { ShortlistPage } from './ShortlistPage'
 
 export function App() {
   return (
     <Routes>
       <Route element={<AppShell />}>
+        <Route path="/" element={<DashboardPage />} />
         <Route
-          path="/"
+          path="/preselected"
           element={
             <ProfileGridPage
-              title="Dashboard"
-              subtitle="Fast review. Declared data vs system indicators are labeled separately."
-              excludeDiscarded
+              title="Preselected"
+              subtitle="Hard filters confirmed. Preferences still need a human look."
+              fixedStatus="PRESELECTED"
             />
           }
         />
-        <Route path="/shortlist" element={<ShortlistPage />} />
+        <Route
+          path="/needs-detail"
+          element={
+            <ProfileGridPage
+              title="Needs detail"
+              subtitle="UNKNOWN is not treated as no. Confirm children, marital status, religion, occupation."
+              fixedStatus="NEEDS_DETAIL"
+            />
+          }
+        />
         <Route
           path="/discarded"
           element={
@@ -26,16 +36,6 @@ export function App() {
               title="Discarded"
               subtitle="Nothing is deleted. Restore if the system was wrong."
               fixedStatus="DISCARDED"
-            />
-          }
-        />
-        <Route
-          path="/manual-review"
-          element={
-            <ProfileGridPage
-              title="Manual review"
-              subtitle="Incomplete or inconsistent profiles. UNKNOWN is not treated as no."
-              fixedStatus="MANUAL_REVIEW"
             />
           }
         />

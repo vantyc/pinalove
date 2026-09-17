@@ -1,7 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 
+process.env.LISTEN_ADDR ??= '127.0.0.1:8787'
+
 function run(command: string, args: string[]): ChildProcess {
-  return spawn(command, args, { stdio: 'inherit', shell: false })
+  return spawn(command, args, { stdio: 'inherit', shell: false, env: process.env })
 }
 
 const backend = run('npx', ['tsx', 'watch', 'backend/src/index.ts'])

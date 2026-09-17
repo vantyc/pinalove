@@ -46,6 +46,20 @@ frontend (Vite/React)  ─┐
 backend (Node/SQLite) ─┘
 ```
 
+## Profile sources (local model)
+
+Identity is **`externalId`**. One candidate row can belong to more than one source. Do not duplicate a person if MATCH and BROWSE share an id.
+
+| Source | PinaLove action | Role |
+|---|---|---|
+| `PINALOVE_MATCH` (legacy `PINALOVE`) | `listsnew` `box=matches` | Read-only match ingest |
+| `PINALOVE_BROWSE` | `browsenew` | Read-only browse ingest |
+| diagnostic only | `profilenew` | One-shot enrichment. Not a bulk strategy. |
+
+Distance: Browse `13` is trusted kilometres. listsnew `~13304` remains untrusted. Do not apply the Browse km rule to MATCH.
+
+The webapp never sends PinaLove messages, likes, hides, blocks, or profile edits. `Mark as sent` / `REPLIED` / `NO_RESPONSE` write **local SQLite only**.
+
 ## Persistence
 
 SQLite at **`/data/pinalove.sqlite`** inside the container.
@@ -140,6 +154,7 @@ All routes are under `/pinalove/`:
 | GET | `/pinalove/api/profiles/:id` | detail |
 | POST | `/pinalove/api/profiles/import` | JSON import |
 | PATCH | `/pinalove/api/profiles/:id/status` | move between review states |
+| PATCH | `/pinalove/api/profiles/:id/contact` | local-only `mark-sent` or notes. Never talks to PinaLove. |
 | PATCH | `/pinalove/api/profiles/:id/decision` | human decision note |
 | GET | `/pinalove/api/profiles/:id/history` | audit log |
 | GET | `/pinalove/api/dashboard/stats` | counts |
@@ -148,11 +163,17 @@ All routes are under `/pinalove/`:
 
 There is **no** `/send-message` route.
 
-Query filters: `ageMin`, `ageMax`, `country`, `location`, `distanceMax`, `hasChildren`, `relationshipStatus`, `maritalHistory`, `religion`, `verified`, `scoreMin`, `scoreMax`, `status`, `flags`, `search`, `shortcut`.
+Query filters: `ageMin`, `ageMax`, `country`, `location`, `distanceMax`, `hasChildren`, `relationshipStatus`, `maritalHistory`, `religion`, `verified`, `scoreMin`, `scoreMax`, `status`, `contactStatus`, `flags`, `search`, `shortcut`.
 
 Shortcuts: `mexico`, `cdmx`, `no-children`, `never-married`, `verified`, `needs-review`, `high-score`.
 
 Scoring weights live in `shared/defaultRules.ts` and can be changed at runtime via `PUT /api/config/rules` without rewriting the app.
+
+Classification (`PRESELECTED` / `NEEDS_DETAIL` / `DISCARDED`) is separate from contact (`NONE` / `STALE_LOCAL_PROBE` / `READY_TO_CONTACT` / `PROBE_SENT` / `REPLIED` / `NO_RESPONSE`). Local stale accounts are not discarded. Probe drafts are never sent by this app.
+
+**profilenew is an approved read-only diagnostic/enrichment capability, not a bulk ingestion strategy.** See `docs/schema-listsnew-vs-profilenew.md`.
+
+Human-in-the-loop review statuses: `UNREVIEWED`, `PRESELECTED`, `NEEDS_DETAIL`, `POTENTIAL`, `SHORTLISTED`, `DISCARDED`, `MANUAL_REVIEW`, `CONTACTED`.
 
 ## Docker
 
@@ -190,4 +211,4 @@ kubectl -n tool4trip rollout restart deploy/pinalove
 
 Explainable, not a black box. Unknown facts stay `UNKNOWN` (never coerced to `NO`/`false`). `SINGLE` is not assumed to mean `NEVER_MARRIED`. Flags are review indicators (“Possible scam indicators detected”), not accusations.
 
-Human-in-the-loop statuses: `UNREVIEWED`, `POTENTIAL`, `SHORTLISTED`, `DISCARDED`, `MANUAL_REVIEW`, `CONTACTED`.
+Human-in-the-loop statuses: `UNREVIEWED`, `PRESELECTED`, `NEEDS_DETAIL`, `POTENTIAL`, `SHORTLISTED`, `DISCARDED`, `MANUAL_REVIEW`, `CONTACTED`. Classification is separate from contact workflow.

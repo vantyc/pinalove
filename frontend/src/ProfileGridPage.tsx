@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useOutletContext } from 'react-router-dom'
 import type { Profile, ProfileFilters, ReviewStatus } from '../../shared/types.ts'
 import { fetchProfiles, patchStatus } from './api'
+import type { ShellContext } from './AppShell'
 import { FilterBar } from './FilterBar'
 import { ProfileCard } from './ProfileCard'
 
@@ -19,6 +20,7 @@ export function ProfileGridPage({
   dense?: boolean
 }) {
   const navigate = useNavigate()
+  const { refreshStats } = useOutletContext<ShellContext>()
   const [filters, setFilters] = useState<ProfileFilters>(
     fixedStatus ? { status: fixedStatus } : {},
   )
@@ -51,6 +53,7 @@ export function ProfileGridPage({
   async function onMove(id: string, status: ReviewStatus, reason?: string) {
     await patchStatus(id, status, reason)
     await load()
+    await refreshStats()
   }
 
   return (

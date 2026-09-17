@@ -1,11 +1,20 @@
 import type { ScoreReason } from '../../shared/types.ts'
 
-export function ScorePanel({ score, reasons }: { score: number | null; reasons: ScoreReason[] }) {
+export function ScorePanel({
+  score,
+  reasons,
+  withheld = false,
+}: {
+  score: number | null
+  reasons: ScoreReason[]
+  withheld?: boolean
+}) {
   return (
     <div className="panel">
-      <h2>Score {score ?? '—'}</h2>
+      <h2>{withheld ? 'Score withheld — incomplete facts' : `Score ${score ?? '—'}`}</h2>
       <p className="legend">
         Explanations are not facts. Declared = profile field. Inferred = system interpretation.
+        Anomalous distanceRaw is not treated as kilometres.
       </p>
       {reasons.map((r, i) => (
         <div className="reason" key={`${r.code}-${i}`}>

@@ -12,10 +12,17 @@
  */
 export const FORBIDDEN_PATH_FRAGMENTS = [
   'send-message',
+  'sendmessage',
   'auto-send',
   'autosend',
   'unmatch',
   'auto-like',
+  'playlikeuser',
+  'playhideuser',
+  'hideuser',
+  'blockuser',
+  'editmyprofilenew',
+  'updatemyprofile',
 ] as const
 
 export function isForbiddenApiPath(pathname: string): boolean {

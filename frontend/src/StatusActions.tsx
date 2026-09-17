@@ -1,12 +1,10 @@
 import type { ReviewStatus } from '../../shared/types.ts'
 
 const ACTIONS: { status: ReviewStatus; label: string; restore?: boolean }[] = [
-  { status: 'SHORTLISTED', label: 'Shortlist' },
-  { status: 'POTENTIAL', label: 'Potential' },
-  { status: 'MANUAL_REVIEW', label: 'Manual review' },
+  { status: 'PRESELECTED', label: 'Preselected' },
+  { status: 'NEEDS_DETAIL', label: 'Needs detail' },
   { status: 'DISCARDED', label: 'Discard' },
   { status: 'UNREVIEWED', label: 'Restore', restore: true },
-  { status: 'CONTACTED', label: 'Contacted' },
 ]
 
 export function StatusActions({

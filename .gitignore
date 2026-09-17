@@ -34,6 +34,14 @@ cookies.txt
 credentials*
 secrets/
 
+# PinaLove session / browser automation — never commit
+storageState*.json
+.pinalove-session/
+playwright/.auth/
+*.har
+chromium-profile/
+chrome-profile/
+
 # Local databases and runtime data
 data/
 *.sqlite
@@ -41,7 +49,14 @@ data/
 *.sqlite-shm
 *.db
 
+# Observed live decks / real usernames — never commit
+fixtures/browse-deck-fase3a.json
+fixtures/*-observed.json
+reader/local-targets.json
+
 # Temporary
 tmp/
 temp/
 .cache/
+*.png
+!frontend/**/*.png

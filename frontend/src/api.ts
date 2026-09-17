@@ -36,6 +36,12 @@ export function filtersToQuery(filters: ProfileFilters): string {
   if (filters.status) {
     q.set('status', Array.isArray(filters.status) ? filters.status.join(',') : filters.status)
   }
+  if (filters.contactStatus) {
+    q.set(
+      'contactStatus',
+      Array.isArray(filters.contactStatus) ? filters.contactStatus.join(',') : filters.contactStatus,
+    )
+  }
   if (filters.flags?.length) q.set('flags', filters.flags.join(','))
   if (filters.shortcut) q.set('shortcut', filters.shortcut)
   if (filters.search) q.set('search', filters.search)
@@ -59,6 +65,19 @@ export function fetchHistory(id: string) {
 
 export function fetchStats() {
   return parse<DashboardStats>(fetch(`${API}/dashboard/stats`))
+}
+
+export function patchContact(
+  id: string,
+  body: { action: 'mark-sent' | 'notes' | 'replied' | 'no-response'; notes?: string | null },
+) {
+  return parse<Profile>(
+    fetch(`${API}/profiles/${id}/contact`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  )
 }
 
 export function fetchRules() {

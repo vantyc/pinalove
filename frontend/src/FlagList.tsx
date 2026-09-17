@@ -15,5 +15,5 @@ export function FlagList({ flags }: { flags: FlagCode[] }) {
 }
 
 export function StatusPill({ status }: { status: ReviewStatus }) {
-  return <span className="pill status">{status.replaceAll('_', ' ')}</span>
+  return <span className={`pill status ${status}`}>{status.replaceAll('_', ' ')}</span>
 }

@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useOutletContext, useParams } from 'react-router-dom'
 import type { DecisionLog, Profile } from '../../shared/types.ts'
 import { fetchHistory, fetchProfile, patchStatus } from './api'
+import type { ShellContext } from './AppShell'
+import { FactsPanel, BioPanel } from './FactsPanel'
 import { FlagList, StatusPill } from './FlagList'
-import { ProposedMessage } from './ProposedMessage'
 import { ScorePanel } from './ScorePanel'
 import { StatusActions } from './StatusActions'
+import { scoreShouldBeWithheld } from '../../shared/workflow.ts'
+import { ProbeDraft, ScoreOrWithheld } from './ProbeDraft'
 
 export function ProfileDetailPage() {
   const { id } = useParams()
+  const { refreshStats } = useOutletContext<ShellContext>()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [history, setHistory] = useState<DecisionLog[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -47,40 +51,76 @@ export function ProfileDetailPage() {
         <div>
           <div className="page-head">
             <h1>{profile.username}</h1>
-            <span className="score">{profile.score ?? '—'}</span>
+            <ScoreOrWithheld profile={profile} />
           </div>
           <div className="meta">
             <span>{profile.age ?? '?'} yrs</span>
             <span>{[profile.location, profile.country].filter(Boolean).join(', ')}</span>
-            {profile.distanceKm != null ? <span>{Math.round(profile.distanceKm)} km</span> : null}
+            {profile.distanceDisplayKm != null ? (
+              <span>
+                {profile.distanceTrust === 'TRUSTED' ? '' : '~'}
+                {Math.round(profile.distanceDisplayKm)} km
+                {profile.distanceTrust === 'UNTRUSTED' ? ' (untrusted)' : ''}
+              </span>
+            ) : null}
             <StatusPill status={profile.reviewStatus} />
+            {profile.contactStatus !== 'NONE' ? (
+              <span className={`pill contact ${profile.contactStatus}`}>{profile.contactStatus.replaceAll('_', ' ')}</span>
+            ) : null}
           </div>
-          <div className="panel">
-            <h2>Declared profile data</h2>
-            <p>Relationship: {profile.relationshipStatus}</p>
-            <p>Marital history: {profile.maritalHistory}</p>
-            <p>Children: {profile.hasChildren}</p>
-            <p>Wants children: {profile.wantsChildren}</p>
-            <p>Religion: {profile.religion ?? 'UNKNOWN'}</p>
-            <p>Practice: {profile.religionPracticeLevel}</p>
-            <p>
-              Verified: photos {profile.photoVerified ? 'yes' : 'no'} / profile{' '}
-              {profile.profileVerified ? 'yes' : 'no'}
-            </p>
-            {profile.heightCm ? <p>Height: {profile.heightCm} cm</p> : null}
-            {profile.headline ? <p>Headline: {profile.headline}</p> : null}
-            {profile.bio ? <p>{profile.bio}</p> : null}
-            <p className="legend">
-              SINGLE is not treated as NEVER_MARRIED. UNKNOWN stays UNKNOWN.
-            </p>
-          </div>
+          <p>
+            <a className="btn primary" href={profile.profileUrl} target="_blank" rel="noreferrer">
+              Open profile
+            </a>
+          </p>
+          {profile.reviewStatus === 'NEEDS_DETAIL' ? (
+            <div className="panel">
+              <h2>Still needs verification</h2>
+              {profile.classificationReasons.length > 0 ? (
+                <ul className="reasons">
+                  {profile.classificationReasons.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {profile.missingDetail.length > 0 ? (
+                <>
+                  <p className="legend">Fields still UNKNOWN:</p>
+                  <ul className="reasons">
+                    {profile.missingDetail.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p className="muted">No remaining UNKNOWN fields recorded.</p>
+              )}
+            </div>
+          ) : null}
+          {profile.reviewStatus === 'DISCARDED' ? (
+            <div className="panel">
+              <h2>Discarded</h2>
+              <p>{profile.decisionReason ?? 'No reason recorded'}</p>
+            </div>
+          ) : null}
+          <ProbeDraft profile={profile} onChange={setProfile} />
+          <FactsPanel profile={profile} />
+          <BioPanel profile={profile} />
           <div className="panel">
             <h2>System indicators</h2>
             <FlagList flags={profile.flags} />
             {profile.decisionReason ? <p>Decision note: {profile.decisionReason}</p> : null}
           </div>
-          <ScorePanel score={profile.score} reasons={profile.scoreReasons} />
-          <ProposedMessage profile={profile} />
+          <ScorePanel
+            score={profile.score}
+            reasons={profile.scoreReasons}
+            withheld={scoreShouldBeWithheld({
+              reviewStatus: profile.reviewStatus,
+              hasChildren: profile.hasChildren,
+              maritalHistory: profile.maritalHistory,
+              contactStatus: profile.contactStatus,
+            })}
+          />
           <div className="panel">
             <h2>Move</h2>
             <StatusActions
@@ -90,6 +130,7 @@ export function ProfileDetailPage() {
                 setProfile(next)
                 const h = await fetchHistory(profile.id)
                 setHistory(h.history)
+                await refreshStats()
               }}
             />
           </div>

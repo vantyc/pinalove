@@ -1,4 +1,5 @@
 import { DEFAULT_RULE_CONFIG } from './defaultRules.ts'
+import { ANOMALOUS_DISTANCE_RAW_KM } from './geo.ts'
 import { FLAG_LABELS } from './types.ts'
 import type {
   FlagCode,
@@ -139,21 +140,27 @@ export function evaluateProfile(
     })
   }
 
-  if (profile.distanceKm != null) {
-    if (profile.distanceKm <= rules.scoring.proximity.preferredMaxKm) {
+  const scoringKm =
+    profile.distanceKm != null &&
+    profile.distanceKm >= 0 &&
+    profile.distanceKm <= ANOMALOUS_DISTANCE_RAW_KM
+      ? profile.distanceKm
+      : null
+  if (scoringKm != null) {
+    if (scoringKm <= rules.scoring.proximity.preferredMaxKm) {
       add(reasons, score, {
         code: 'proximity',
         direction: 'plus',
         points: w.proximity,
-        message: `Distance ${Math.round(profile.distanceKm)} km is nearby`,
+        message: `Distance ${Math.round(scoringKm)} km is nearby`,
         kind: 'declared',
       })
-    } else if (profile.distanceKm <= rules.scoring.proximity.acceptableMaxKm) {
+    } else if (scoringKm <= rules.scoring.proximity.acceptableMaxKm) {
       add(reasons, score, {
         code: 'proximity',
         direction: 'plus',
         points: Math.round(w.proximity / 3),
-        message: `Distance ${Math.round(profile.distanceKm)} km is moderate`,
+        message: `Distance ${Math.round(scoringKm)} km is moderate`,
         kind: 'declared',
       })
     } else {
@@ -161,7 +168,7 @@ export function evaluateProfile(
         code: 'proximity',
         direction: 'minus',
         points: -Math.round(w.proximity / 2),
-        message: `Distance ${Math.round(profile.distanceKm)} km is far from the preferred area`,
+        message: `Distance ${Math.round(scoringKm)} km is far from the preferred area`,
         kind: 'declared',
       })
     }
