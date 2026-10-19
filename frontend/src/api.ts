@@ -74,7 +74,7 @@ export function fetchStats() {
 export function patchContact(
   id: string,
   body: {
-    action: 'mark-sent' | 'notes' | 'replied' | 'no-response' | 'discard' | 'restore' | 'archive' | 'interested'
+    action: 'mark-sent' | 'notes' | 'replied' | 'no-response' | 'discard' | 'restore' | 'archive' | 'interested' | 'visual-interested'
     notes?: string | null
   },
 ) {

@@ -5,6 +5,7 @@ import path from 'node:path'
 import { after, describe, it } from 'node:test'
 import { createApp } from './app.ts'
 import { isForbiddenApiPath } from './safety.ts'
+import { inVisualReviewQueue } from '../../shared/visualReview.ts'
 
 const dir = mkdtempSync(path.join(tmpdir(), 'pinalove-'))
 const sqlitePath = path.join(dir, 'pinalove.sqlite')
@@ -74,6 +75,13 @@ function listen(): Promise<string> {
       resolve(baseUrl)
     })
   })
+}
+
+function approveVisual(id: string, now = Date.parse('2026-09-16T19:00:00.000Z')) {
+  const next = app.store.markVisualInterested(id, now)
+  assert.ok(next)
+  assert.equal(next.visualReviewStatus, 'INTERESTED')
+  return next
 }
 
 describe('api + store', () => {
@@ -217,8 +225,10 @@ describe('api + store', () => {
       }),
     })
     assert.equal((await imported.json()).imported, 1)
-    const applied = app.store.applyLocalWorkflow(Date.parse('2026-09-16T19:00:00.000Z'))
-    assert.ok(applied >= 1)
+    const created = app.store.list({}).find((p) => p.username === 'AdaStaleLocal')
+    assert.ok(created)
+    assert.equal(created.visualReviewStatus, 'PENDING')
+    approveVisual(created.id, Date.parse('2026-09-16T19:00:00.000Z'))
     const listed = await (await fetch(`${base}/pinalove/api/profiles?contactStatus=STALE_LOCAL_PROBE`)).json()
     const pat = listed.profiles.find((p: { username: string }) => p.username === 'AdaStaleLocal')
     assert.ok(pat)
@@ -360,7 +370,9 @@ describe('api + store', () => {
     const browseResult = await browseImport.json()
     assert.equal(browseResult.imported, 0)
     assert.equal(browseResult.updated, 1)
-    app.store.applyLocalWorkflow(Date.parse('2026-09-17T01:34:00.000Z'))
+    const merged = app.store.list({}).find((p) => p.externalId === '900001')
+    assert.ok(merged)
+    approveVisual(merged.id, Date.parse('2026-09-17T01:34:00.000Z'))
     const listed = await (await fetch(`${base}/pinalove/api/profiles`)).json()
     const pats = listed.profiles.filter((p: { externalId: string }) => p.externalId === '900001')
     assert.equal(pats.length, 1)
@@ -415,7 +427,9 @@ describe('api + store', () => {
       }),
     })
     assert.equal((await imported.json()).imported, 1)
-    app.store.applyLocalWorkflow(Date.parse('2026-09-16T19:00:00.000Z'))
+    const freeze = app.store.list({}).find((p) => p.username === 'FreezeDraft')
+    assert.ok(freeze)
+    approveVisual(freeze.id, Date.parse('2026-09-16T19:00:00.000Z'))
     const listed = await (await fetch(`${base}/pinalove/api/profiles`)).json()
     const row = listed.profiles.find((p: { username: string }) => p.username === 'FreezeDraft')
     assert.ok(row.draftMessage)
@@ -536,7 +550,9 @@ describe('api + store', () => {
       }),
     })
     assert.equal((await imported.json()).imported, 1)
-    app.store.applyLocalWorkflow(Date.parse('2026-09-16T19:00:00.000Z'))
+    const discardMe = app.store.list({}).find((p) => p.username === 'DiscardMe')
+    assert.ok(discardMe)
+    approveVisual(discardMe.id, Date.parse('2026-09-16T19:00:00.000Z'))
     const listed = await (await fetch(`${base}/pinalove/api/profiles`)).json()
     const row = listed.profiles.find((p: { username: string }) => p.username === 'DiscardMe')
     assert.equal(row.contactStatus, 'READY_TO_CONTACT')
@@ -573,7 +589,10 @@ describe('api + store', () => {
     })
     const back = await restored.json()
     assert.equal(back.reviewStatus, 'PRESELECTED')
-    assert.equal(back.contactStatus, 'READY_TO_CONTACT')
+    assert.equal(back.visualReviewStatus, 'PENDING')
+    assert.equal(back.contactStatus, 'NONE')
+    const afterVisual = approveVisual(row.id, Date.parse('2026-09-16T19:00:00.000Z'))
+    assert.equal(afterVisual.contactStatus, 'READY_TO_CONTACT')
     assert.ok(back.lastHumanActionAt)
     const history = await (await fetch(`${base}/pinalove/api/profiles/${row.id}/history`)).json()
     assert.ok(history.history.some((h: { reason: string }) => /manual discard/i.test(h.reason)))
@@ -605,7 +624,9 @@ describe('api + store', () => {
       }),
     })
     assert.equal((await imported.json()).imported, 1)
-    app.store.applyLocalWorkflow(Date.parse('2026-09-16T19:00:00.000Z'))
+    const staleRow = app.store.list({}).find((p) => p.username === 'StaleDiscard')
+    assert.ok(staleRow)
+    approveVisual(staleRow.id, Date.parse('2026-09-16T19:00:00.000Z'))
     const listed = await (await fetch(`${base}/pinalove/api/profiles`)).json()
     const row = listed.profiles.find((p: { username: string }) => p.username === 'StaleDiscard')
     assert.equal(row.contactStatus, 'STALE_LOCAL_PROBE')
@@ -646,6 +667,8 @@ describe('api + store', () => {
     assert.match(confirm, /already marked as sent/)
     assert.match(confirm, /recorded reply/)
     const ui = readFileSync(join(process.cwd(), 'frontend/src/ActionRequiredList.tsx'), 'utf8')
+    assert.match(ui, /VISUAL REVIEW/)
+    assert.match(ui, /visual-interested/)
     assert.match(ui, /NEW INBOUND — REVIEW FIRST/)
     assert.match(ui, /INTERESTED/)
     assert.match(ui, /DISCARD/)
@@ -805,6 +828,7 @@ describe('api + store', () => {
     const interestedJson = await interestedRes.json()
     assert.equal(interestedRes.status, 200)
     assert.equal(interestedJson.inboundReviewStatus, 'INTERESTED')
+    assert.equal(interestedJson.visualReviewStatus, 'INTERESTED')
     assert.equal(interestedJson.conversationNeedsReply, true)
     assert.equal(interestedJson.inboundUnread, true)
     assert.equal(interestedJson.lastInboundPreview, 'hi from cebu')
@@ -824,6 +848,7 @@ describe('api + store', () => {
     const discardedJson = await discardedRes.json()
     assert.equal(discardedRes.status, 200)
     assert.equal(discardedJson.inboundReviewStatus, 'DISCARDED')
+    assert.equal(discardedJson.visualReviewStatus, 'DISCARDED')
     assert.equal(discardedJson.reviewStatus, 'DISCARDED')
     assert.equal(discardedJson.conversationNeedsReply, false)
     assert.equal(discardedJson.lastInboundPreview, 'hello good morning')
@@ -895,5 +920,139 @@ describe('api + store', () => {
     assert.equal(/apiRequest|sendmessage|mailboxnew|convonew|markasread|hideuser|blockuser/.test(storeSrc), false)
     const ui = readFileSync(path.join(process.cwd(), 'frontend/src/ActionRequiredList.tsx'), 'utf8')
     assert.equal(/sendmessage|mailboxnew|convonew|markasread|hideuser|blockuser/.test(ui), false)
+  })
+
+  it('visual review is local SQLite and grandfathering does not use MATCH/BROWSE as interest', async () => {
+    const base = await listen()
+    const imported = await fetch(`${base}/pinalove/api/profiles/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        profiles: [
+          {
+            externalId: 'visual-match-1',
+            username: 'VisualMatchOnly',
+            profileUrl: 'https://www.pinalove.com/VisualMatchOnly',
+            source: 'PINALOVE',
+            age: 41,
+            location: 'Cebu',
+            reviewStatus: 'NEEDS_DETAIL',
+            faceVerified: 'YES',
+            hasChildren: 'UNKNOWN',
+          },
+          {
+            externalId: 'visual-browse-1',
+            username: 'VisualBrowseOnly',
+            profileUrl: 'https://www.pinalove.com/VisualBrowseOnly',
+            source: 'PINALOVE_BROWSE',
+            age: null,
+            location: 'Mexico City',
+            country: 'Mexico',
+            reviewStatus: 'NEEDS_DETAIL',
+            faceVerified: 'YES',
+          },
+          {
+            externalId: 'visual-unknown-age',
+            username: 'VisualUnknownAge',
+            profileUrl: 'https://www.pinalove.com/VisualUnknownAge',
+            source: 'PINALOVE',
+            age: null,
+            reviewStatus: 'UNREVIEWED',
+          },
+        ],
+      }),
+    })
+    const importResult = await imported.json()
+    assert.equal(importResult.imported, 3)
+    const match = app.store.list({}).find((p) => p.username === 'VisualMatchOnly')
+    const browse = app.store.list({}).find((p) => p.username === 'VisualBrowseOnly')
+    const unknownAge = app.store.list({}).find((p) => p.username === 'VisualUnknownAge')
+    assert.ok(match && browse && unknownAge)
+    assert.equal(match.visualReviewStatus, 'PENDING')
+    assert.equal(browse.visualReviewStatus, 'PENDING')
+    assert.equal(unknownAge.age, null)
+    app.store.applyLocalWorkflow(Date.parse('2026-09-16T19:00:00.000Z'))
+    assert.equal(app.store.getById(match.id)?.contactStatus, 'NONE')
+    assert.notEqual(app.store.getById(match.id)?.contactStatus, 'READY_TO_CONTACT')
+    assert.equal(inVisualReviewQueue(app.store.getById(match.id)!), true)
+    assert.ok(app.store.stats().visualReviewPending >= 3)
+    assert.equal(
+      app.store.list({}).filter((p) => p.id === match.id && p.visualReviewStatus === 'INTERESTED').length,
+      0,
+    )
+
+    const visualRes = await fetch(`${base}/pinalove/api/profiles/${match.id}/contact`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'visual-interested' }),
+    })
+    const visualJson = await visualRes.json()
+    assert.equal(visualRes.status, 200)
+    assert.equal(visualJson.visualReviewStatus, 'INTERESTED')
+    assert.notEqual(visualJson.reviewStatus, 'PRESELECTED')
+    assert.notEqual(visualJson.inboundReviewStatus, 'INTERESTED')
+    assert.ok(visualJson.contactStatus === 'READY_TO_CONTACT' || visualJson.reviewStatus === 'NEEDS_DETAIL')
+
+    const discarded = await fetch(`${base}/pinalove/api/profiles/${browse.id}/contact`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'discard' }),
+    })
+    const discardedJson = await discarded.json()
+    assert.equal(discardedJson.visualReviewStatus, 'DISCARDED')
+    assert.equal(discardedJson.reviewStatus, 'DISCARDED')
+    assert.equal(discardedJson.contactStatus, 'NONE')
+    const statsAfterDiscard = app.store.stats()
+    assert.equal(app.store.list({}).filter((p) => inVisualReviewQueue(p) && p.id === browse.id).length, 0)
+    assert.ok(statsAfterDiscard.discarded >= 1)
+
+    const db = (app.store as unknown as { db: { prepare: (sql: string) => { run: (...a: unknown[]) => unknown } } }).db
+    const seed = async (username: string, contact: string, review: string) => {
+      const r = await fetch(`${base}/pinalove/api/profiles/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profiles: [
+            {
+              externalId: `mig-${username}`,
+              username,
+              profileUrl: `https://www.pinalove.com/${username}`,
+              source: 'PINALOVE',
+              reviewStatus: review,
+            },
+          ],
+        }),
+      })
+      assert.equal((await r.json()).imported, 1)
+      db.prepare(
+        'UPDATE profiles SET contact_status = ?, review_status = ?, visual_review_status = NULL WHERE username = ?',
+      ).run(contact, review, username)
+    }
+    await seed('MigMessageSent', 'MESSAGE_SENT', 'NEEDS_DETAIL')
+    await seed('MigProbeSent', 'PROBE_SENT', 'NEEDS_DETAIL')
+    await seed('MigReplied', 'REPLIED', 'NEEDS_DETAIL')
+    await seed('MigDiscarded', 'NONE', 'DISCARDED')
+    await seed('MigOrdinaryMatch', 'NONE', 'NEEDS_DETAIL')
+    app.store.applyVisualReviewMigration()
+    app.store.applyVisualReviewMigration()
+    assert.equal(app.store.list({}).find((p) => p.username === 'MigMessageSent')?.visualReviewStatus, 'INTERESTED')
+    assert.equal(app.store.list({}).find((p) => p.username === 'MigProbeSent')?.visualReviewStatus, 'INTERESTED')
+    assert.equal(app.store.list({}).find((p) => p.username === 'MigReplied')?.visualReviewStatus, 'INTERESTED')
+    assert.equal(app.store.list({}).find((p) => p.username === 'MigDiscarded')?.visualReviewStatus, 'DISCARDED')
+    assert.equal(app.store.list({}).find((p) => p.username === 'MigOrdinaryMatch')?.visualReviewStatus, 'PENDING')
+
+    const { matchesVisualAgeMax } = await import('../../shared/visualReview.ts')
+    assert.equal(matchesVisualAgeMax(unknownAge.age, 33), true)
+    assert.equal(unknownAge.age, null)
+    assert.equal(match.age, 41)
+    const ageBefore = match.age
+    assert.equal(matchesVisualAgeMax(41, 33), false)
+    assert.equal(app.store.getById(match.id)?.age, ageBefore)
+
+    assert.equal(isForbiddenApiPath('/pinalove/api/profiles/x/contact'), false)
+    const { readFileSync } = await import('node:fs')
+    const storeSrc = readFileSync(new URL('./store.ts', import.meta.url), 'utf8')
+    assert.match(storeSrc, /markVisualInterested/)
+    assert.equal(/apiRequest|sendmessage|mailboxnew|convonew|markasread|hideuser|blockuser/.test(storeSrc), false)
   })
 })

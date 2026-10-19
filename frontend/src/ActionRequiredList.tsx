@@ -48,6 +48,9 @@ function FactLine({ label, value, extra }: { label: string; value: string; extra
 }
 
 export function ActionRequiredList({
+  visualReview = [],
+  visualAgeMax,
+  onVisualAgeMaxChange,
   pendingInbound = [],
   replies = [],
   ready,
@@ -57,6 +60,9 @@ export function ActionRequiredList({
   discarded,
   onProfileChange,
 }: {
+  visualReview?: Profile[]
+  visualAgeMax?: number
+  onVisualAgeMaxChange?: (next: number | undefined) => void
   pendingInbound?: Profile[]
   replies?: Profile[]
   ready: Profile[]
@@ -71,7 +77,8 @@ export function ActionRequiredList({
     <div>
       <h2>Action required</h2>
       <p className="muted">What needs attention, in order. Review first; contacting is optional and always manual.</p>
-      {pendingInbound.length === 0 &&
+      {visualReview.length === 0 &&
+      pendingInbound.length === 0 &&
       replies.length === 0 &&
       ready.length === 0 &&
       stale.length === 0 &&
@@ -79,6 +86,87 @@ export function ActionRequiredList({
       needsDetail.length === 0 ? (
         <p className="empty">Nothing in the action queue.</p>
       ) : null}
+      <section className="action-block">
+        <h3>VISUAL REVIEW</h3>
+        <p className="muted">
+          Decide attraction first. Details, drafts, and READY TO MESSAGE wait until INTERESTED.
+          Age max is a view filter only — UNKNOWN age stays visible and is not stored as 0.
+        </p>
+        <div className="filters visual-age-filter">
+          <label>
+            Age max
+            <input
+              type="number"
+              min={1}
+              placeholder="none"
+              value={visualAgeMax ?? ''}
+              onChange={(e) => {
+                const raw = e.target.value
+                onVisualAgeMaxChange?.(raw ? Number(raw) : undefined)
+              }}
+            />
+          </label>
+        </div>
+        {visualReview.length > 0 ? (
+          visualReview.map((profile) => (
+            <article className="card action-card visual-card" key={profile.id}>
+              <div className="photo">
+                {profile.primaryPhotoUrl ? (
+                  <img src={profile.primaryPhotoUrl} alt="" />
+                ) : (
+                  <div className="photo-placeholder">No photo</div>
+                )}
+              </div>
+              <div className="card-body">
+                <div className="row">
+                  <button className="username btn ghost" type="button" onClick={() => navigate(`/profiles/${profile.id}`)}>
+                    {profile.username}
+                  </button>
+                  <span className="pill">VISUAL PENDING</span>
+                </div>
+                <div className="meta">
+                  <span>{profile.age != null ? `${profile.age} yrs` : 'age UNKNOWN'}</span>
+                  <span>{[profile.location, profile.country].filter(Boolean).join(', ') || 'Unknown location'}</span>
+                  <span>{profile.source.replaceAll('_', ' ')}</span>
+                  <span>Last active: {formatActivity(profile.lastActivityAt)}</span>
+                </div>
+                <div className="actions" style={{ marginTop: '0.7rem' }}>
+                  <button
+                    className="btn primary"
+                    type="button"
+                    onClick={() => {
+                      void patchContact(profile.id, { action: 'visual-interested' }).then(onProfileChange)
+                    }}
+                  >
+                    ♥ INTERESTED
+                  </button>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          'Discard this profile locally? PinaLove will not be changed. The row stays for audit.',
+                        )
+                      ) {
+                        return
+                      }
+                      void patchContact(profile.id, { action: 'discard' }).then(onProfileChange)
+                    }}
+                  >
+                    ✕ DISCARD
+                  </button>
+                  <a className="btn" href={profile.profileUrl} target="_blank" rel="noreferrer">
+                    OPEN PROFILE
+                  </a>
+                </div>
+              </div>
+            </article>
+          ))
+        ) : (
+          <p className="muted">VISUAL REVIEW — none waiting.</p>
+        )}
+      </section>
       {pendingInbound.length > 0 ? (
         <section className="action-block">
           <h3>NEW INBOUND — REVIEW FIRST</h3>

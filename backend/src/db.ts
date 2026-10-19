@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   inbox_identity TEXT,
   inbox_mail_id TEXT,
   inbound_review_status TEXT,
+  visual_review_status TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -141,6 +142,7 @@ const PROFILE_MIGRATIONS: { name: string; ddl: string }[] = [
   { name: 'inbox_identity', ddl: 'TEXT' },
   { name: 'inbox_mail_id', ddl: 'TEXT' },
   { name: 'inbound_review_status', ddl: 'TEXT' },
+  { name: 'visual_review_status', ddl: 'TEXT' },
 ]
 
 function migrateProfiles(db: DatabaseSync): void {
@@ -158,6 +160,7 @@ function migrateProfiles(db: DatabaseSync): void {
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_inbox_identity ON profiles(inbox_identity) WHERE inbox_identity IS NOT NULL',
   )
   migrateInboundReview(db)
+  migrateVisualReview(db)
 }
 
 export function migrateInboundReview(db: DatabaseSync): void {
@@ -172,6 +175,27 @@ export function migrateInboundReview(db: DatabaseSync): void {
     UPDATE profiles
     SET conversation_needs_reply = 0
     WHERE inbound_review_status = 'PENDING'
+  `)
+}
+
+/** Idempotent. Does not infer interest from MATCH/BROWSE/score. Only fills NULL visual_review_status. */
+export function migrateVisualReview(db: DatabaseSync): void {
+  db.exec(`
+    UPDATE profiles
+    SET visual_review_status = 'INTERESTED'
+    WHERE (visual_review_status IS NULL OR visual_review_status = '')
+      AND contact_status IN ('MESSAGE_SENT', 'PROBE_SENT', 'REPLIED')
+  `)
+  db.exec(`
+    UPDATE profiles
+    SET visual_review_status = 'DISCARDED'
+    WHERE (visual_review_status IS NULL OR visual_review_status = '')
+      AND review_status = 'DISCARDED'
+  `)
+  db.exec(`
+    UPDATE profiles
+    SET visual_review_status = 'PENDING'
+    WHERE visual_review_status IS NULL OR visual_review_status = ''
   `)
 }
 

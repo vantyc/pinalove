@@ -1,6 +1,7 @@
 import { isLocalMexico } from './geo.ts'
 import { isStaleForLocalProbe } from './activity.ts'
-import type { ContactStatus, LogisticPriority, ReviewStatus, Tristate } from './types.ts'
+import type { ContactStatus, LogisticPriority, ReviewStatus, Tristate, VisualReviewStatus } from './types.ts'
+import { visualBlocksNormalWorkflow } from './visualReview.ts'
 
 export type WorkflowInput = {
   reviewStatus: ReviewStatus
@@ -13,6 +14,8 @@ export type WorkflowInput = {
   now?: number
   /** Inbox-only rows must not enter READY/PROBE queues. */
   inboxOnly?: boolean
+  /** PENDING/DISCARDED visual review must not enter READY/PROBE queues. */
+  visualReviewStatus?: VisualReviewStatus | null
 }
 
 export type WorkflowAssignment = {
@@ -55,6 +58,17 @@ export function assignContact(input: WorkflowInput): WorkflowAssignment {
   if (TERMINAL_CONTACT.has(previous)) {
     return {
       contactStatus: previous,
+      logisticPriority: highLocal(local),
+      stale,
+      local,
+      priorityReasons,
+      uncertaintyReasons,
+    }
+  }
+
+  if (visualBlocksNormalWorkflow(input.visualReviewStatus)) {
+    return {
+      contactStatus: 'NONE',
       logisticPriority: highLocal(local),
       stale,
       local,
@@ -147,21 +161,23 @@ export function conversationNeedsReply(input: {
   return inbound > outbound
 }
 
-/** Dashboard order: new inbound review, replies, probes, ready, needs detail, discarded. */
+/** Dashboard order: inbound, visual, replies, probes, ready, needs detail, discarded. */
 export function dashboardSectionRank(input: {
   inboundReviewStatus?: string | null
+  visualReviewStatus?: string | null
   lastInboundAt?: string | null
   inboundUnread?: boolean
   conversationNeedsReply?: boolean
   contactStatus: ContactStatus
   reviewStatus: ReviewStatus
-}): 1 | 2 | 3 | 4 | 5 | 6 | null {
+}): 1 | 2 | 3 | 4 | 5 | 6 | 7 | null {
   if (input.inboundReviewStatus === 'PENDING' && (input.lastInboundAt || input.inboundUnread)) return 1
-  if (input.conversationNeedsReply) return 2
-  if (input.contactStatus === 'STALE_LOCAL_PROBE') return 3
-  if (input.contactStatus === 'READY_TO_CONTACT') return 4
-  if (input.reviewStatus === 'NEEDS_DETAIL') return 5
-  if (input.reviewStatus === 'DISCARDED') return 6
+  if (input.visualReviewStatus === 'PENDING' && input.reviewStatus !== 'DISCARDED') return 2
+  if (input.conversationNeedsReply) return 3
+  if (input.contactStatus === 'STALE_LOCAL_PROBE') return 4
+  if (input.contactStatus === 'READY_TO_CONTACT') return 5
+  if (input.reviewStatus === 'NEEDS_DETAIL') return 6
+  if (input.reviewStatus === 'DISCARDED') return 7
   return null
 }
 

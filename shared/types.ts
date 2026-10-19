@@ -28,6 +28,10 @@ export type ContactStatus = (typeof CONTACT_STATUSES)[number]
 export const INBOUND_REVIEW_STATUSES = ['PENDING', 'INTERESTED', 'DISCARDED'] as const
 export type InboundReviewStatus = (typeof INBOUND_REVIEW_STATUSES)[number]
 
+/** Human visual attraction decision. Independent from review, contact, and inbound. */
+export const VISUAL_REVIEW_STATUSES = ['PENDING', 'INTERESTED', 'DISCARDED'] as const
+export type VisualReviewStatus = (typeof VISUAL_REVIEW_STATUSES)[number]
+
 export const DISTANCE_TRUSTS = ['TRUSTED', 'UNTRUSTED', 'UNKNOWN'] as const
 export type DistanceTrust = (typeof DISTANCE_TRUSTS)[number]
 
@@ -236,6 +240,7 @@ export type Profile = {
   lastInboundPreview: string | null
   conversationNeedsReply: boolean
   inboundReviewStatus: InboundReviewStatus | null
+  visualReviewStatus: VisualReviewStatus | null
   inboxIdentity: string | null
   inboxMailId: string | null
   logisticPriority: LogisticPriority
@@ -318,6 +323,12 @@ export type DashboardStats = {
   needsReply: number
   pendingInbound: number
   interestedInbound: number
+  /** VISUAL REVIEW queue: PENDING visual, not inbound-pending, not discarded. */
+  visualReviewPending: number
+  /** visualReviewStatus=INTERESTED, including grandfathered contact. */
+  visuallyInterested: number
+  /** NEEDS_DETAIL after visual INTERESTED, excluding inbound-pending and other queues. */
+  needsDetailActionable: number
   actionRequired: number
 }
 

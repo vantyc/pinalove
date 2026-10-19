@@ -17,7 +17,13 @@ import {
   queueConversationNeedsReply,
   type MailboxNewItem,
 } from '../../shared/inbox.ts'
-import { migrateInboundReview } from './db.ts'
+import {
+  inVisualReviewQueue,
+  isPendingInboundReview,
+  visualBlocksNormalWorkflow,
+  visualReviewFromEvidence,
+} from '../../shared/visualReview.ts'
+import { migrateInboundReview, migrateVisualReview } from './db.ts'
 import type {
   ActivityCategory,
   ContactStatus,
@@ -112,6 +118,7 @@ type ProfileRow = {
   inbox_identity: string | null
   inbox_mail_id: string | null
   inbound_review_status: string | null
+  visual_review_status: string | null
   created_at: string
   updated_at: string
 }
@@ -219,6 +226,12 @@ function rowToProfile(row: ProfileRow): Profile {
       row.inbound_review_status === 'INTERESTED' ||
       row.inbound_review_status === 'DISCARDED'
         ? row.inbound_review_status
+        : null,
+    visualReviewStatus:
+      row.visual_review_status === 'PENDING' ||
+      row.visual_review_status === 'INTERESTED' ||
+      row.visual_review_status === 'DISCARDED'
+        ? row.visual_review_status
         : null,
     inboxIdentity: row.inbox_identity ?? null,
     inboxMailId: row.inbox_mail_id ?? null,
@@ -379,10 +392,27 @@ export class ProfileStore {
         (p) => p.inboundReviewStatus === 'PENDING' && (p.lastInboundAt != null || p.inboundUnread),
       ).length,
       interestedInbound: profiles.filter((p) => p.inboundReviewStatus === 'INTERESTED').length,
+      visualReviewPending: profiles.filter((p) => inVisualReviewQueue(p)).length,
+      visuallyInterested: profiles.filter((p) => p.visualReviewStatus === 'INTERESTED').length,
+      needsDetailActionable: profiles.filter(
+        (p) =>
+          p.reviewStatus === 'NEEDS_DETAIL' &&
+          p.visualReviewStatus === 'INTERESTED' &&
+          !p.conversationNeedsReply &&
+          !isPendingInboundReview(p) &&
+          p.contactStatus !== 'STALE_LOCAL_PROBE' &&
+          p.contactStatus !== 'READY_TO_CONTACT' &&
+          p.contactStatus !== 'PROBE_SENT' &&
+          p.contactStatus !== 'MESSAGE_SENT' &&
+          p.contactStatus !== 'REPLIED' &&
+          p.contactStatus !== 'NO_RESPONSE',
+      ).length,
       actionRequired: profiles.filter((p) => {
-        if (p.inboundReviewStatus === 'PENDING' && (p.lastInboundAt != null || p.inboundUnread)) return true
+        if (isPendingInboundReview(p)) return true
+        if (inVisualReviewQueue(p)) return true
         if (p.conversationNeedsReply) return true
         if (p.reviewStatus === 'DISCARDED') return false
+        if (p.visualReviewStatus !== 'INTERESTED') return false
         if (p.contactStatus === 'STALE_LOCAL_PROBE') return true
         if (p.contactStatus === 'READY_TO_CONTACT') return true
         if (
@@ -454,11 +484,11 @@ export class ProfileStore {
       .prepare(
         `UPDATE profiles SET
           review_status = ?, contact_status = ?, decision_reason = ?,
-          inbound_review_status = ?, conversation_needs_reply = 0,
+          inbound_review_status = ?, visual_review_status = ?, conversation_needs_reply = 0,
           last_human_action_at = ?, updated_at = ?
          WHERE id = ?`,
       )
-      .run('DISCARDED', 'NONE', reason, 'DISCARDED', ts, ts, id)
+      .run('DISCARDED', 'NONE', reason, 'DISCARDED', 'DISCARDED', ts, ts, id)
     this.appendLog(id, current.reviewStatus, 'DISCARDED', reason, 'USER', ts)
     return this.getById(id)
   }
@@ -487,6 +517,11 @@ export class ProfileStore {
       hasChildren: current.hasChildren,
       now,
       inboxOnly: isInboxOnly(current),
+      visualReviewStatus: hasPriorOutboundContact(
+        current.repliedAt ? 'REPLIED' : current.manuallySentAt ? 'MESSAGE_SENT' : 'NONE',
+      )
+        ? 'INTERESTED'
+        : 'PENDING',
     })
     let contactStatus = assigned.contactStatus
     if (current.repliedAt) contactStatus = 'REPLIED'
@@ -517,6 +552,7 @@ export class ProfileStore {
     if (current.inboundReviewStatus === 'DISCARDED' && (current.lastInboundAt || current.inboundUnread)) {
       inboundReview = hasPriorOutboundContact(contactStatus) ? 'INTERESTED' : 'PENDING'
     }
+    const visualReview = hasPriorOutboundContact(contactStatus) ? 'INTERESTED' : 'PENDING'
     const inboundPending =
       Boolean(current.inboundUnread) ||
       workflowNeedsReply({
@@ -528,6 +564,11 @@ export class ProfileStore {
       inboundReviewStatus: inboundReview,
       contactStatus,
     })
+    const freezeVisualDraft = visualBlocksNormalWorkflow(visualReview)
+    if (freezeVisualDraft) {
+      draft = current.draftMessage
+      draftAt = current.draftCreatedAt
+    }
     this.db
       .prepare(
         `UPDATE profiles SET
@@ -535,6 +576,7 @@ export class ProfileStore {
           contact_status = ?, draft_message = ?, draft_created_at = ?, proposed_message = ?,
           logistic_priority = ?, priority_reasons = ?, uncertainty_reasons = ?,
           inbound_review_status = ?, conversation_needs_reply = ?,
+          visual_review_status = ?,
           last_human_action_at = ?, updated_at = ?
          WHERE id = ?`,
       )
@@ -551,6 +593,7 @@ export class ProfileStore {
         JSON.stringify(assigned.uncertaintyReasons),
         inboundReview,
         needsReply ? 1 : 0,
+        visualReview,
         ts,
         ts,
         id,
@@ -586,8 +629,12 @@ export class ProfileStore {
     return this.getById(id)
   }
 
-  applyLocalWorkflow(now = Date.now()): number {
-    const rows = this.db.prepare('SELECT * FROM profiles').all() as ProfileRow[]
+  applyLocalWorkflow(now = Date.now(), onlyId?: string): number {
+    const rows = (
+      onlyId
+        ? [this.db.prepare('SELECT * FROM profiles WHERE id = ?').get(onlyId)]
+        : this.db.prepare('SELECT * FROM profiles').all()
+    ).filter(Boolean) as ProfileRow[]
     const ts = nowIso()
     const stmt = this.db.prepare(
       `UPDATE profiles SET
@@ -617,10 +664,12 @@ export class ProfileStore {
         hasChildren: profile.hasChildren,
         now,
         inboxOnly: isInboxOnly(profile),
+        visualReviewStatus: profile.visualReviewStatus,
       })
       let draft = profile.draftMessage
       let draftAt = profile.draftCreatedAt
       const freezeDraft =
+        visualBlocksNormalWorkflow(profile.visualReviewStatus) ||
         isInboxOnly(profile) ||
         Boolean(profile.manuallySentAt) ||
         profile.contactStatus === 'PROBE_SENT' ||
@@ -684,6 +733,9 @@ export class ProfileStore {
          WHERE id = ?`,
       )
       .run(status, ts, ts, ts, ts, id)
+    this.db
+      .prepare('UPDATE profiles SET visual_review_status = ? WHERE id = ? AND (visual_review_status IS NULL OR visual_review_status = ? OR visual_review_status = ?)')
+      .run('INTERESTED', id, '', 'PENDING')
     this.appendLog(id, current.reviewStatus, current.reviewStatus, 'marked as sent (manual, local only)', 'USER', ts)
     return this.getById(id)
   }
@@ -701,6 +753,13 @@ export class ProfileStore {
          WHERE id = ?`,
       )
       .run(outcome, repliedAt, needsReply, ts, ts, id)
+    if (outcome === 'REPLIED') {
+      this.db
+        .prepare(
+          'UPDATE profiles SET visual_review_status = ? WHERE id = ? AND (visual_review_status IS NULL OR visual_review_status = ? OR visual_review_status = ?)',
+        )
+        .run('INTERESTED', id, '', 'PENDING')
+    }
     this.appendLog(
       id,
       current.reviewStatus,
@@ -755,20 +814,48 @@ export class ProfileStore {
     this.db
       .prepare(
         `UPDATE profiles SET
-          inbound_review_status = ?, conversation_needs_reply = ?,
+          inbound_review_status = ?, visual_review_status = ?, conversation_needs_reply = ?,
           last_human_action_at = ?, updated_at = ?
          WHERE id = ?`,
       )
-      .run('INTERESTED', needsReply ? 1 : 0, ts, ts, id)
+      .run('INTERESTED', 'INTERESTED', needsReply ? 1 : 0, ts, ts, id)
     this.appendLog(
       id,
       current.reviewStatus,
       current.reviewStatus,
-      'inbound INTERESTED (manual, local only)',
+      'inbound INTERESTED (manual, local only); visualReviewStatus=INTERESTED',
       'USER',
       ts,
     )
     return this.getById(id)
+  }
+
+  /** Human visual interest. SQLite only. Does not mean PRESELECTED / READY / inbound INTERESTED. */
+  markVisualInterested(id: string, now = Date.now()): Profile | null {
+    const current = this.getById(id)
+    if (!current) return null
+    const ts = nowIso()
+    this.db
+      .prepare(
+        `UPDATE profiles SET
+          visual_review_status = ?, last_human_action_at = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run('INTERESTED', ts, ts, id)
+    this.appendLog(
+      id,
+      current.reviewStatus,
+      current.reviewStatus,
+      'visual INTERESTED (manual, local only)',
+      'USER',
+      ts,
+    )
+    this.applyLocalWorkflow(now, id)
+    return this.getById(id)
+  }
+
+  applyVisualReviewMigration(): void {
+    migrateVisualReview(this.db)
   }
 
   applyInboundReviewMigration(): void {
@@ -856,7 +943,7 @@ export class ProfileStore {
               gender, face_verified, field_facts, classification_reasons, missing_detail,
               facts, text_signals, data_conflicts, contact_status,
               last_inbound_at, inbound_unread, last_inbound_preview, conversation_needs_reply,
-              inbound_review_status, inbox_identity, inbox_mail_id, created_at, updated_at
+              inbound_review_status, visual_review_status, inbox_identity, inbox_mail_id, created_at, updated_at
             ) VALUES (
               ?, NULL, ?, ?, ?,
               ?, ?, NULL,
@@ -867,7 +954,7 @@ export class ProfileStore {
               ?, 'UNKNOWN', '{}', '[]', '[]',
               '[]', '[]', '[]', 'NONE',
               ?, ?, ?, 0,
-              'PENDING', ?, ?, ?, ?
+              'PENDING', 'PENDING', ?, ?, ?, ?
             )`,
           )
           .run(
@@ -1135,6 +1222,12 @@ export class ProfileStore {
       lastInboundPreview: existing?.lastInboundPreview ?? null,
       conversationNeedsReply: existing?.conversationNeedsReply ?? false,
       inboundReviewStatus: existing?.inboundReviewStatus ?? null,
+      visualReviewStatus:
+        existing?.visualReviewStatus ??
+        visualReviewFromEvidence({
+          reviewStatus: status,
+          contactStatus: existing?.contactStatus ?? 'NONE',
+        }),
       inboxIdentity: existing?.inboxIdentity ?? null,
       inboxMailId: existing?.inboxMailId ?? null,
       logisticPriority: existing?.logisticPriority ?? 'NONE',
@@ -1258,6 +1351,9 @@ export class ProfileStore {
         profile.activityCategory,
       )
     if (!existing) {
+      this.db
+        .prepare('UPDATE profiles SET visual_review_status = ? WHERE id = ?')
+        .run(profile.visualReviewStatus, profile.id)
       this.appendLog(profile.id, null, profile.reviewStatus, 'imported', 'IMPORT', ts)
       return 'inserted'
     }

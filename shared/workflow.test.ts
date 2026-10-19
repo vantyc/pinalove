@@ -310,7 +310,7 @@ describe('inbox conversationNeedsReply', () => {
         contactStatus: 'READY_TO_CONTACT',
         reviewStatus: 'PRESELECTED',
       }),
-      2,
+      3,
     )
     assert.equal(
       dashboardSectionRank({
@@ -318,7 +318,7 @@ describe('inbox conversationNeedsReply', () => {
         contactStatus: 'STALE_LOCAL_PROBE',
         reviewStatus: 'NEEDS_DETAIL',
       }),
-      3,
+      4,
     )
     assert.equal(
       dashboardSectionRank({
@@ -326,7 +326,27 @@ describe('inbox conversationNeedsReply', () => {
         contactStatus: 'READY_TO_CONTACT',
         reviewStatus: 'PRESELECTED',
       }),
-      4,
+      5,
+    )
+    assert.equal(
+      dashboardSectionRank({
+        inboundReviewStatus: 'PENDING',
+        lastInboundAt: '2026-09-16T18:00:00.000Z',
+        inboundUnread: true,
+        conversationNeedsReply: false,
+        contactStatus: 'NONE',
+        reviewStatus: 'UNREVIEWED',
+      }),
+      1,
+    )
+    assert.equal(
+      dashboardSectionRank({
+        visualReviewStatus: 'PENDING',
+        conversationNeedsReply: false,
+        contactStatus: 'NONE',
+        reviewStatus: 'NEEDS_DETAIL',
+      }),
+      2,
     )
   })
 
